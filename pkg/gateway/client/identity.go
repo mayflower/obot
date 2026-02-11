@@ -56,6 +56,42 @@ func (c *Client) EnsureIdentity(ctx context.Context, id *types.Identity, timezon
 	return c.EnsureIdentityWithRole(ctx, id, timezone, c.emailsWithExplicitRoles[strings.ToLower(id.Email)])
 }
 
+// GetUserByExternalIdentity retrieves a user by their external identity (auth provider and provider user ID).
+// Returns an error if the identity or user is not found.
+func (c *Client) GetUserByExternalIdentity(ctx context.Context, authProviderNamespace, authProviderName, providerUserID string) (*types.User, error) {
+	hashedProviderUserID := hash.String(providerUserID)
+
+	var identity types.Identity
+	err := c.db.WithContext(ctx).
+		Where("auth_provider_namespace = ? AND auth_provider_name = ? AND hashed_provider_user_id = ?",
+			authProviderNamespace, authProviderName, hashedProviderUserID).
+		First(&identity).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("identity not found for provider %s/%s", authProviderNamespace, authProviderName)
+		}
+		return nil, fmt.Errorf("failed to find identity: %w", err)
+	}
+
+	if identity.UserID == 0 {
+		return nil, fmt.Errorf("identity has no associated user")
+	}
+
+	var user types.User
+	if err := c.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", identity.UserID).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("user not found for identity")
+		}
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+
+	if err := c.decryptUser(ctx, &user); err != nil {
+		return nil, fmt.Errorf("failed to decrypt user: %w", err)
+	}
+
+	return &user, nil
+}
+
 // EnsureIdentityWithRole ensures the given identity exists in the database with the at least the given role, and returns the user associated with it.
 // If the user already exists with a superset of the given role, it will not be updated.
 func (c *Client) EnsureIdentityWithRole(ctx context.Context, id *types.Identity, timezone string, role types2.Role) (*types.User, error) {

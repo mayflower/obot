@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/logger"
 	"github.com/obot-platform/obot/pkg/api"
@@ -35,6 +36,7 @@ const (
 	tokenTypeJWT            = "urn:ietf:params:oauth:token-type:jwt"
 	tokenTypeAccessToken    = "urn:ietf:params:oauth:token-type:access_token"
 	tokenTypeAPIKey         = "urn:obot:token-type:api-key"
+	tokenTypeIDToken        = "urn:ietf:params:oauth:token-type:id_token"
 	ErrUnsupportedGrantType = ErrorCode("unsupported_grant_type")
 )
 
@@ -364,10 +366,16 @@ func (h *handler) doTokenExchange(req api.Context, oauthClient v1.OAuthClient, r
 		})
 	}
 
+	// Handle external IdP token exchange (e.g., Google ID tokens)
+	// This allows external applications to exchange their IdP tokens for Obot access tokens
+	if subjectTokenType == tokenTypeIDToken {
+		return h.doExternalIdPTokenExchange(req, oauthClient, subjectToken)
+	}
+
 	if subjectTokenType != tokenTypeJWT && subjectTokenType != tokenTypeAPIKey {
 		return types.NewErrBadRequest("%v", Error{
 			Code:        ErrInvalidRequest,
-			Description: "subject_token_type must be urn:ietf:params:oauth:token-type:jwt or urn:obot:token-type:api-key",
+			Description: "subject_token_type must be urn:ietf:params:oauth:token-type:jwt, urn:obot:token-type:api-key, or urn:ietf:params:oauth:token-type:id_token",
 		})
 	}
 
@@ -691,4 +699,125 @@ func validateAPIKeyAccess(ctx api.Context, apiKey *gwtypes.APIKey, mcpID string)
 	}
 
 	return fmt.Errorf("API key does not have access to MCP server %s", mcpID)
+}
+
+// doExternalIdPTokenExchange handles token exchange for external Identity Providers.
+// This allows external applications to exchange their IdP tokens for Obot access tokens
+// without requiring users to log in to Obot separately.
+//
+// Supported providers are determined by the registered validators in the IdP registry.
+// Currently supported: Google (more providers can be added by implementing ExternalIdPValidator).
+//
+// Security: Only OAuth clients explicitly listed in OBOT_EXTERNAL_IDP_ALLOWED_CLIENTS
+// are permitted to use this flow.
+//
+// Flow:
+// 1. Verify the OAuth client is authorized for external IdP token exchange
+// 2. Validate the external IdP token using registered validators
+// 3. Create/find the user and identity in Obot (upsert, if auto-provisioning enabled)
+// 4. Create an Obot auth token
+// 5. Return the token in RFC 8693 format
+func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAuthClient, subjectToken string) error {
+	// Step 1: Verify the OAuth client is authorized for external IdP token exchange
+	clientID := fmt.Sprintf("%s:%s", oauthClient.Namespace, oauthClient.Name)
+	if !h.externalIdPConf.IsClientAllowed(clientID) {
+		log.Warnf("External IdP token exchange: client %s not authorized", clientID)
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrUnauthorizedClient,
+			Description: "client is not authorized for external IdP token exchange",
+		})
+	}
+
+	// Step 2: Validate the external IdP token using the registry
+	claims, validator, err := h.idpRegistry.ValidateToken(req.Context(), subjectToken)
+	if err != nil {
+		log.Warnf("External IdP token validation failed: %v", err)
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrInvalidGrant,
+			Description: "subject token validation failed",
+		})
+	}
+
+	providerName := validator.ProviderName()
+	log.Infof("External IdP token exchange: validated %s token for %s (sub: %s) via client %s",
+		providerName, claims.Email, claims.Subject, clientID)
+
+	// Step 3: Ensure identity exists (creates user if auto-provisioning enabled)
+	identity := &gwtypes.Identity{
+		AuthProviderName:      validator.AuthProviderName(),
+		AuthProviderNamespace: validator.AuthProviderNamespace(),
+		ProviderUserID:        claims.Subject,
+		ProviderUsername:      claims.Email,
+		Email:                 claims.Email,
+		IconURL:               claims.Picture,
+	}
+
+	var user *gwtypes.User
+	if h.externalIdPConf.AutoProvision {
+		// Auto-provisioning enabled: create user if needed
+		user, err = req.GatewayClient.EnsureIdentity(req.Context(), identity, "")
+		if err != nil {
+			log.Errorf("Failed to ensure identity for %s: %v", claims.Email, err)
+			return types.NewErrBadRequest("%v", Error{
+				Code:        ErrServerError,
+				Description: "identity provisioning failed",
+			})
+		}
+	} else {
+		// Auto-provisioning disabled: only allow existing users
+		user, err = req.GatewayClient.GetUserByExternalIdentity(
+			req.Context(),
+			validator.AuthProviderNamespace(),
+			validator.AuthProviderName(),
+			claims.Subject,
+		)
+		if err != nil {
+			log.Warnf("External IdP token exchange: user not found for %s (auto-provision disabled)", claims.Email)
+			return types.NewErrBadRequest("%v", Error{
+				Code:        ErrAccessDenied,
+				Description: "user not registered, contact administrator",
+			})
+		}
+	}
+
+	log.Infof("External IdP token exchange: authenticated user %d (%s) via %s", user.ID, claims.Email, providerName)
+
+	// Step 4: Create an Obot JWT directly (no database token)
+	// This simplifies the token flow - clients receive a JWT that can be validated
+	// via JWKS without database lookups.
+	now := time.Now()
+	expiresAt := now.Add(time.Hour) // 1 hour TTL for security
+
+	jwtClaims := jwt.MapClaims{
+		"sub":                     fmt.Sprintf("%d", user.ID),
+		"aud":                     h.baseURL,
+		"exp":                     float64(expiresAt.Unix()),
+		"iat":                     float64(now.Unix()),
+		"email":                   claims.Email,
+		"name":                    user.Username,
+		"picture":                 claims.Picture,
+		"AuthProviderNamespace":   validator.AuthProviderNamespace(),
+		"AuthProviderName":        validator.AuthProviderName(),
+		"AuthProviderUserID":      claims.Subject,
+	}
+
+	_, publicToken, err := h.tokenService.NewTokenWithClaims(req.Context(), jwtClaims)
+	if err != nil {
+		log.Errorf("Failed to create JWT for %s: %v", claims.Email, err)
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrServerError,
+			Description: "token generation failed",
+		})
+	}
+
+	log.Infof("External IdP token exchange: created JWT for user %d via %s, expires at %v", user.ID, providerName, expiresAt)
+
+	// Step 5: Return RFC 8693 compliant response
+	// Note: issued_token_type is now JWT since we return an actual JWT
+	return req.Write(TokenExchangeResponse{
+		AccessToken:     publicToken,
+		IssuedTokenType: tokenTypeJWT,
+		TokenType:       "Bearer",
+		ExpiresIn:       int(time.Until(expiresAt).Seconds()),
+	})
 }

@@ -35,6 +35,7 @@ const (
 	ErrServerError             ErrorCode = "server_error"
 	ErrTemporarilyUnavailable  ErrorCode = "temporarily_unavailable"
 	ErrInvalidClientMetadata   ErrorCode = "invalid_client_metadata"
+	ErrInvalidGrant            ErrorCode = "invalid_grant" // RFC 6749: invalid grant (e.g., invalid token)
 )
 
 // Error represents an OAuth 2.0 error response.
@@ -362,9 +363,8 @@ func (h *handler) oauthCallback(req api.Context) error {
 
 	if oauthAuthRequestID == "" {
 		// If there is no OAuth request object, then MCP OAuth wasn't started by OAuth; likely the UI kicked it off.
-		// Redirect to the login complete page.
-		log.Infof("Completed MCP OAuth callback without first-level OAuth auth request context")
-		http.Redirect(req.ResponseWriter, req.Request, "/login_complete", http.StatusFound)
+		// Redirect to the configured auth complete URL (defaults to /login_complete).
+		http.Redirect(req.ResponseWriter, req.Request, h.authCompleteURL, http.StatusFound)
 		return nil
 	}
 

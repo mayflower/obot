@@ -825,7 +825,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		return nil, err
 	}
 
-	authenticators := gserver.NewGatewayTokenReviewer(gatewayClient, providerDispatcher)
+	authenticators := gserver.NewGatewayTokenReviewer(gatewayClient, providerDispatcher, persistentTokenServer)
 	if config.EnableAuthentication {
 		proxyManager = proxy.NewProxyManager(providerDispatcher)
 

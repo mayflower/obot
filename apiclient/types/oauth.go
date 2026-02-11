@@ -1,6 +1,22 @@
 package types
 
 type OAuthClientManifest struct {
+	// ClientID is an optional identifier for the client resource name.
+	// If provided, it will be used as the resource name (with "oc1" prefix added automatically).
+	// Must be lowercase alphanumeric with hyphens only (e.g., "my-app-client").
+	// If omitted, a random ID will be generated.
+	// This is useful for SSO integrations that need predictable client IDs.
+	// Optional.
+	ClientID string `json:"client_id,omitempty"`
+
+	// ClientSecret is an optional secret for client authentication.
+	// If provided, it will be used instead of generating a random secret.
+	// This is useful for SSO integrations that need to pre-configure the secret
+	// in external systems (e.g., Kubernetes secrets) before creating the OAuth client.
+	// The secret is hashed before storage; it cannot be retrieved after creation.
+	// Optional.
+	ClientSecret string `json:"client_secret,omitempty"`
+
 	// RedirectURI is a single redirection URI string
 	// Maintained for backward compatibility
 	//

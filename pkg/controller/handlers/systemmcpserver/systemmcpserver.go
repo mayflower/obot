@@ -226,7 +226,7 @@ func (h *Handler) EnsureDeployment(req router.Request, _ router.Response) error 
 
 	// Deploy the system server via backend
 	// System servers don't use webhooks, so pass nil
-	_, err = h.mcpSessionManager.LaunchServer(req.Ctx, serverConfig)
+	_, _, err = h.mcpSessionManager.LaunchServer(req.Ctx, serverConfig)
 	if err != nil {
 		return fmt.Errorf("failed to deploy system MCP server: %w", err)
 	}

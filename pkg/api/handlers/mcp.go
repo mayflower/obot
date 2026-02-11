@@ -597,7 +597,7 @@ func (m *MCPHandler) LaunchServer(req api.Context) error {
 				_, err = m.mcpSessionManager.ListTools(req.Context(), config)
 			} else {
 				// Don't use ListTools for remote MCP servers in case they need OAuth.
-				_, err = m.mcpSessionManager.LaunchServer(req.Context(), config)
+				_, _, err = m.mcpSessionManager.LaunchServer(req.Context(), config)
 			}
 			if err != nil {
 				if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
@@ -624,7 +624,7 @@ func (m *MCPHandler) LaunchServer(req api.Context) error {
 		_, err = m.mcpSessionManager.ListTools(req.Context(), serverConfig)
 	} else {
 		// Don't use ListTools for remote MCP servers in case they need OAuth.
-		_, err = m.mcpSessionManager.LaunchServer(req.Context(), serverConfig)
+		_, _, err = m.mcpSessionManager.LaunchServer(req.Context(), serverConfig)
 	}
 	if err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
