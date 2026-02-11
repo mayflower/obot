@@ -77,7 +77,7 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	mcp := handlers.NewMCPHandler(services.MCPLoader, services.AccessControlRuleHelper, oauthChecker, services.MCPRuntimeBackend, services.ServerURL)
 	projectMCP := handlers.NewProjectMCPHandler(services.MCPLoader, services.AccessControlRuleHelper, oauthChecker, services.ServerURL, services.InternalServerURL)
 	projectInvitations := handlers.NewProjectInvitationHandler()
-	mcpGateway := mcpgateway.NewHandler(services.MCPLoader, services.WebhookHelper, services.OAuthServerConfig.ScopesSupported, services.NanobotIntegration)
+	mcpGateway := mcpgateway.NewHandler(services.MCPLoader, services.WebhookHelper, services.PersistentTokenServer, services.OAuthServerConfig.ScopesSupported, services.NanobotIntegration)
 	mcpAuditLogs := mcpgateway.NewAuditLogHandler()
 	auditLogExports := handlers.NewAuditLogExportHandler(services.GPTClient)
 	serverInstances := handlers.NewServerInstancesHandler(services.AccessControlRuleHelper, services.ServerURL)
@@ -854,7 +854,7 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	wellknown.SetupHandlers(services.ServerURL, services.OAuthServerConfig, services.RegistryNoAuth, mux)
 
 	// Obot OAuth
-	oauth.SetupHandlers(oauthChecker, services.MCPOAuthTokenStorage, services.PersistentTokenServer, services.OAuthServerConfig, services.ServerURL, mux)
+	oauth.SetupHandlers(oauthChecker, services.MCPOAuthTokenStorage, services.PersistentTokenServer, services.OAuthServerConfig, services.ServerURL, services.GatewayServer.AuthCompleteURL(), mux)
 
 	// Gateway APIs
 	services.GatewayServer.AddRoutes(services.APIServer)

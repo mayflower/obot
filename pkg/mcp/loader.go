@@ -245,14 +245,15 @@ func (sm *SessionManager) closeClient(server ServerConfig, clientScope string) {
 	}
 }
 
-// LaunchServer will ensure that the server is deployed
-func (sm *SessionManager) LaunchServer(ctx context.Context, serverConfig ServerConfig) (string, error) {
+// LaunchServer will ensure that the server is deployed.
+// Returns the URL and the transformed ServerConfig (with internal URLs in k8s mode).
+func (sm *SessionManager) LaunchServer(ctx context.Context, serverConfig ServerConfig) (string, ServerConfig, error) {
 	if serverConfig.ProjectMCPServer {
-		return "", errors.New("cannot launch project MCP server")
+		return "", ServerConfig{}, errors.New("cannot launch project MCP server")
 	}
 
 	c, err := sm.ensureDeployment(ctx, serverConfig, true)
-	return c.URL, err
+	return c.URL, c, err
 }
 
 // ShutdownServer will close the connections to the MCP server and remove all of the resources.

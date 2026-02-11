@@ -222,7 +222,7 @@ func (h *NanobotAgentHandler) Launch(req api.Context) error {
 		}
 	}
 
-	if _, err = h.sessionManager.LaunchServer(req.Context(), serverConfig); err != nil {
+	if _, _, err = h.sessionManager.LaunchServer(req.Context(), serverConfig); err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
 			return types.NewErrHTTP(http.StatusServiceUnavailable, fmt.Sprintf("MCP server for agent %s is not healthy, check configuration for errors", agent.Name))
 		}

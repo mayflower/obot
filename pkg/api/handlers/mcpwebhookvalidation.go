@@ -365,7 +365,7 @@ func (m *MCPWebhookValidationHandler) Launch(req api.Context) error {
 	if serverConfig.Runtime != types.RuntimeRemote {
 		_, err = m.mcpSessionManager.ListTools(req.Context(), serverConfig)
 	} else {
-		_, err = m.mcpSessionManager.LaunchServer(req.Context(), serverConfig)
+		_, _, err = m.mcpSessionManager.LaunchServer(req.Context(), serverConfig)
 	}
 	if err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {

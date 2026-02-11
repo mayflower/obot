@@ -112,6 +112,18 @@ func (k *kubernetesBackend) deployServerObjects(ctx context.Context, server Serv
 }
 
 func (k *kubernetesBackend) ensureServerDeployment(ctx context.Context, server ServerConfig, webhooks []Webhook) (ServerConfig, error) {
+	// Transform URLs to use internal service FQDN (for cluster-internal communication)
+	server.TokenExchangeEndpoint = k.transformObotHostname(server.TokenExchangeEndpoint)
+	server.AuditLogEndpoint = k.transformObotHostname(server.AuditLogEndpoint)
+	// NOTE: Do NOT transform server.Issuer - it must match the JWT issuer claim,
+	// which uses the external hostname (OBOT_SERVER_HOSTNAME). The issuer is only
+	// used for string comparison during JWT validation, not for network calls.
+
+	// Transform audiences to use internal service FQDN
+	for i, audience := range server.Audiences {
+		server.Audiences[i] = k.transformObotHostname(audience)
+	}
+
 	// Transform component URLs to use internal service FQDN
 	for i, component := range server.Components {
 		component.URL = k.transformObotHostname(component.URL)

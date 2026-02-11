@@ -12,8 +12,10 @@ import (
 )
 
 type Options struct {
-	Hostname   string
-	UIHostname string `name:"ui-hostname" env:"OBOT_SERVER_UI_HOSTNAME"`
+	Hostname        string
+	UIHostname      string `name:"ui-hostname" env:"OBOT_SERVER_UI_HOSTNAME"`
+	AuthCompleteURL string `name:"auth-complete-url" env:"OBOT_SERVER_AUTH_COMPLETE_URL" usage:"Custom URL to redirect to after authentication completes (overrides default /login_complete)"`
+	GatewayDebug    bool
 
 	DailyUserPromptTokenLimit     int `usage:"The maximum number of daily user prompt/input token to allow, <= 0 disables the limit" default:"10000000"`     // default is 10 million
 	DailyUserCompletionTokenLimit int `usage:"The maximum number of daily user completion/output tokens to allow, <= 0 disables the limit" default:"100000"` // default is 100 thousand
@@ -22,6 +24,7 @@ type Options struct {
 type Server struct {
 	db                                 *db.DB
 	baseURL, uiURL                     string
+	authCompleteURLOverride            string
 	tokenService                       *persistent.TokenService
 	dispatcher                         *dispatcher.Dispatcher
 	acrHelper                          *accesscontrolrule.Helper
@@ -36,6 +39,7 @@ func New(ctx context.Context, db *db.DB, tokenService *persistent.TokenService, 
 		db:                                 db,
 		baseURL:                            opts.Hostname,
 		uiURL:                              opts.UIHostname,
+		authCompleteURLOverride:            opts.AuthCompleteURL,
 		tokenService:                       tokenService,
 		dispatcher:                         modelProviderDispatcher,
 		acrHelper:                          acrHelper,

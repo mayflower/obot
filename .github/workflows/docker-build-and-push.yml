@@ -12,6 +12,7 @@ on:
   push:
     branches:
       - main
+      - rfc8693-external-idp-token-exchange
     tags:
       - "v*"
     paths-ignore:

@@ -81,6 +81,16 @@ require (
 	sigs.k8s.io/yaml v1.6.0
 )
 
+require github.com/coreos/go-oidc/v3 v3.17.0
+
+require (
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
+	github.com/pterm/pterm v0.12.80 // indirect
+	golang.org/x/text v0.35.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1
+)
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go/monitoring v1.24.2 // indirect
@@ -106,7 +116,6 @@ require (
 	github.com/exponent-io/jsonpath v0.0.0-20210407135951-1de76d718b3f // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-gorp/gorp/v3 v3.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/gosuri/uitable v0.0.4 // indirect
@@ -213,7 +222,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dop251/goja v0.0.0-20250630131328-58d95d85e994 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -306,7 +314,6 @@ require (
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
-	github.com/pterm/pterm v0.12.80 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
@@ -357,7 +364,6 @@ require (
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	google.golang.org/genproto v0.0.0-20250603155806-513f23925822 // indirect
@@ -370,7 +376,6 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kms v0.34.7 // indirect

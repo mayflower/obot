@@ -1,27 +1,83 @@
 package oauth
 
 import (
+	"os"
+	"strings"
+
 	"github.com/obot-platform/obot/pkg/api/handlers"
 	"github.com/obot-platform/obot/pkg/api/server"
 	"github.com/obot-platform/obot/pkg/jwt/persistent"
 	"github.com/obot-platform/obot/pkg/mcp"
 )
 
-type handler struct {
-	oauthChecker *MCPOAuthHandlerFactory
-	tokenService *persistent.TokenService
-	oauthConfig  handlers.OAuthAuthorizationServerConfig
-	tokenStore   mcp.GlobalTokenStore
-	baseURL      string
+// ExternalIdPConfig holds configuration for external IdP token exchange.
+type ExternalIdPConfig struct {
+	// AllowedClientIDs restricts which OAuth clients can use external IdP token exchange.
+	// If empty, external IdP token exchange is disabled.
+	AllowedClientIDs []string
+
+	// AutoProvision allows creating new users via external IdP token exchange.
+	// If false, only pre-existing users can authenticate via external IdP.
+	AutoProvision bool
 }
 
-func SetupHandlers(oauthChecker *MCPOAuthHandlerFactory, tokenStore mcp.GlobalTokenStore, tokenService *persistent.TokenService, oauthConfig handlers.OAuthAuthorizationServerConfig, baseURL string, mux *server.Server) {
+// NewExternalIdPConfig creates configuration from environment variables.
+func NewExternalIdPConfig() ExternalIdPConfig {
+	config := ExternalIdPConfig{
+		AutoProvision: true, // Default to enabled for development convenience
+	}
+
+	// Parse allowed client IDs
+	if clients := os.Getenv("OBOT_EXTERNAL_IDP_ALLOWED_CLIENTS"); clients != "" {
+		config.AllowedClientIDs = strings.Split(clients, ",")
+		for i := range config.AllowedClientIDs {
+			config.AllowedClientIDs[i] = strings.TrimSpace(config.AllowedClientIDs[i])
+		}
+	}
+
+	// Parse auto-provision setting
+	if autoProvision := os.Getenv("OBOT_EXTERNAL_IDP_AUTO_PROVISION"); autoProvision != "" {
+		config.AutoProvision = autoProvision == "true" || autoProvision == "1"
+	}
+
+	return config
+}
+
+// IsClientAllowed checks if a client ID is allowed to use external IdP token exchange.
+func (c ExternalIdPConfig) IsClientAllowed(clientID string) bool {
+	if len(c.AllowedClientIDs) == 0 {
+		return false // No clients allowed if not configured
+	}
+	for _, allowed := range c.AllowedClientIDs {
+		if allowed == clientID {
+			return true
+		}
+	}
+	return false
+}
+
+type handler struct {
+	oauthChecker    *MCPOAuthHandlerFactory
+	tokenService    *persistent.TokenService
+	oauthConfig     handlers.OAuthAuthorizationServerConfig
+	tokenStore      mcp.GlobalTokenStore
+	baseURL         string
+	authCompleteURL string
+	idpRegistry     *ExternalIdPRegistry
+	externalIdPConf ExternalIdPConfig
+}
+
+func SetupHandlers(oauthChecker *MCPOAuthHandlerFactory, tokenStore mcp.GlobalTokenStore, tokenService *persistent.TokenService, oauthConfig handlers.OAuthAuthorizationServerConfig, baseURL string, authCompleteURL string, mux *server.Server) {
+	externalIdPConf := NewExternalIdPConfig()
 	h := &handler{
-		tokenStore:   tokenStore,
-		tokenService: tokenService,
-		oauthConfig:  oauthConfig,
-		baseURL:      baseURL,
-		oauthChecker: oauthChecker,
+		tokenStore:      tokenStore,
+		tokenService:    tokenService,
+		oauthConfig:     oauthConfig,
+		baseURL:         baseURL,
+		authCompleteURL: authCompleteURL,
+		oauthChecker:    oauthChecker,
+		idpRegistry:     NewExternalIdPRegistry(externalIdPConf),
+		externalIdPConf: externalIdPConf,
 	}
 
 	mux.HandleFunc("POST /oauth/register/{mcp_id}", h.register)
