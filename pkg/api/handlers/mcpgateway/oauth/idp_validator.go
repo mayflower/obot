@@ -74,6 +74,12 @@ func NewExternalIdPRegistry(config ExternalIdPConfig) *ExternalIdPRegistry {
 		log.Infof("Registered external IdP validator: %s", entraValidator.ProviderName())
 	}
 
+	// Register generic OIDC validator if configured (e.g., Dex, Keycloak, Auth0)
+	if oidcValidator, err := NewOIDCIdPValidator(); err == nil {
+		registry.Register(oidcValidator)
+		log.Infof("Registered external IdP validator: %s (issuer: %s)", oidcValidator.ProviderName(), oidcValidator.issuer)
+	}
+
 	// Log configuration
 	if len(config.AllowedClientIDs) > 0 {
 		log.Infof("External IdP token exchange enabled for clients: %v", config.AllowedClientIDs)
