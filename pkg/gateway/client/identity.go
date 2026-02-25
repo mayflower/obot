@@ -248,6 +248,12 @@ func (c *Client) ensureIdentity(ctx context.Context, tx *gorm.DB, id *types.Iden
 		// We check for both true and null values, because the email might have been verified before we started tracking verified emails.
 		userQuery = userQuery.Where("hashed_email = ? and (verified_email = true or verified_email is null)", user.HashedEmail)
 		checkForExistingUser = true
+	} else if user.HashedEmail != "" {
+		// For unverified providers (e.g., external IdP token exchange via RFC 8693),
+		// still check for an existing user with this email to avoid duplicate key errors
+		// when the user already has an identity from a verified provider like Google.
+		userQuery = userQuery.Where("hashed_email = ?", user.HashedEmail)
+		checkForExistingUser = true
 	}
 
 	if checkForExistingUser {
