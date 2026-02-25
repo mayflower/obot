@@ -789,16 +789,17 @@ func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAu
 	expiresAt := now.Add(time.Hour) // 1 hour TTL for security
 
 	jwtClaims := jwt.MapClaims{
-		"sub":                     fmt.Sprintf("%d", user.ID),
-		"aud":                     h.baseURL,
-		"exp":                     float64(expiresAt.Unix()),
-		"iat":                     float64(now.Unix()),
-		"email":                   claims.Email,
-		"name":                    user.Username,
-		"picture":                 claims.Picture,
-		"AuthProviderNamespace":   validator.AuthProviderNamespace(),
-		"AuthProviderName":        validator.AuthProviderName(),
-		"AuthProviderUserID":      claims.Subject,
+		"sub":                   fmt.Sprintf("%d", user.ID),
+		"aud":                   h.baseURL,
+		"exp":                   float64(expiresAt.Unix()),
+		"iat":                   float64(now.Unix()),
+		"email":                 claims.Email,
+		"name":                  user.Username,
+		"picture":               claims.Picture,
+		"UserGroups":            strings.Join(user.Role.Groups(), ","),
+		"AuthProviderNamespace": validator.AuthProviderNamespace(),
+		"AuthProviderName":      validator.AuthProviderName(),
+		"AuthProviderUserID":    claims.Subject,
 	}
 
 	_, publicToken, err := h.tokenService.NewTokenWithClaims(req.Context(), jwtClaims)

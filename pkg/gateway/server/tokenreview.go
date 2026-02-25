@@ -55,8 +55,9 @@ func (g *gatewayTokenReview) AuthenticateRequest(req *http.Request) (*authentica
 
 			return &authenticator.Response{
 				User: &user.DefaultInfo{
-					Name: tokenCtx.UserName,
-					UID:  tokenCtx.UserID,
+					Name:   tokenCtx.UserName,
+					UID:    tokenCtx.UserID,
+					Groups: tokenCtx.UserGroups,
 					Extra: map[string][]string{
 						"email":                   {tokenCtx.UserEmail},
 						"auth_provider_namespace": {namespace},
