@@ -102,23 +102,24 @@ type Config struct {
 	AuthOwnerEmails      []string `usage:"Emails of owner users"`
 	StaticDir            string   `usage:"The directory to serve static files from"`
 
-	DefaultMCPCatalogPath                string `usage:"The path to the default MCP catalog (accessible to all users)" default:""`
-	DefaultSystemMCPCatalogPath          string `usage:"The path to the default System MCP catalog" default:""`
-	DefaultSkillRepoURL                  string `usage:"The default skill repository URL (must be HTTPS GitHub URL)" default:"https://github.com/obot-platform/skills" env:"OBOT_DEFAULT_SKILL_REPO_URL"`
-	DefaultSkillRepoRef                  string `usage:"The ref (branch/tag) for the default skill repository" default:"" env:"OBOT_DEFAULT_SKILL_REPO_REF"`
-	DisableUpdateCheck                   bool   `usage:"Disable Obot server update checks"`
-	EnableRegistryAuth                   bool   `usage:"Enable authentication for the MCP registry API" default:"false" env:"OBOT_SERVER_ENABLE_REGISTRY_AUTH"`
-	EnableMessagePolicies                bool   `usage:"Enable message policies for LLM proxy content enforcement" default:"false"`
-	EnableAgents                         *bool  `usage:"Enable Obot Agent features. When unset, agents are disabled for new deployments but grandfathered in for deployments that already have agents. Explicitly set to true to force-enable, or false to force-disable, regardless of grandfathering." env:"OBOT_ENABLE_AGENTS"`
-	MCPOAuthClientExpiration             string `usage:"The expiration time in dynamically registered MCP OAuth clients, must be a valid duration string and may include days, hours, or minutes" default:"30d"`
-	MCPServerSearchImage                 string `usage:"Container image for the obot MCP server" default:"ghcr.io/obot-platform/obot-mcp-server:v0.2.0"`
-	NanobotAgentImage                    string `usage:"Container image for the Nanobot agent MCP server" default:"ghcr.io/obot-platform/nanobot-agent:v0.0.84"`
-	MCPNetworkPolicyProviderChartRepo    string `usage:"Helm repository URL for the network policy provider chart"`
-	MCPNetworkPolicyProviderChartName    string `usage:"Helm chart name for the network policy provider chart"`
-	MCPNetworkPolicyProviderChartVersion string `usage:"Helm chart version for the network policy provider chart"`
-	MCPNetworkPolicyProviderChartPath    string `usage:"Local filesystem path to the network policy provider chart"`
-	MCPNetworkPolicyProviderValues       string `usage:"YAML or JSON values blob merged into the network policy provider chart values"`
-	MCPDefaultDenyAllEgress              bool   `usage:"Default new MCP servers to deny all egress when network policy enforcement is enabled" default:"false"`
+	DefaultMCPCatalogPath                string   `usage:"The path to the default MCP catalog (accessible to all users)" default:""`
+	DefaultSystemMCPCatalogPath          string   `usage:"The path to the default System MCP catalog" default:""`
+	DefaultSkillRepoURL                  string   `usage:"The default skill repository URL (must be HTTPS GitHub URL)" default:"https://github.com/obot-platform/skills" env:"OBOT_DEFAULT_SKILL_REPO_URL"`
+	DefaultSkillRepoRef                  string   `usage:"The ref (branch/tag) for the default skill repository" default:"" env:"OBOT_DEFAULT_SKILL_REPO_REF"`
+	DisableUpdateCheck                   bool     `usage:"Disable Obot server update checks"`
+	EnableRegistryAuth                   bool     `usage:"Enable authentication for the MCP registry API" default:"false" env:"OBOT_SERVER_ENABLE_REGISTRY_AUTH"`
+	EnableMessagePolicies                bool     `usage:"Enable message policies for LLM proxy content enforcement" default:"false"`
+	EnableAgents                         *bool    `usage:"Enable Obot Agent features. When unset, agents are disabled for new deployments but grandfathered in for deployments that already have agents. Explicitly set to true to force-enable, or false to force-disable, regardless of grandfathering." env:"OBOT_ENABLE_AGENTS"`
+	MCPOAuthClientExpiration             string   `usage:"The expiration time in dynamically registered MCP OAuth clients, must be a valid duration string and may include days, hours, or minutes" default:"30d"`
+	MCPOAuthReturnURLAllowlist           []string `usage:"Allowed absolute URL prefixes for MCP OAuth return_url redirects" env:"OBOT_MCP_OAUTH_RETURN_URL_ALLOWLIST"`
+	MCPServerSearchImage                 string   `usage:"Container image for the obot MCP server" default:"ghcr.io/obot-platform/obot-mcp-server:v0.2.0"`
+	NanobotAgentImage                    string   `usage:"Container image for the Nanobot agent MCP server" default:"ghcr.io/obot-platform/nanobot-agent:v0.0.84"`
+	MCPNetworkPolicyProviderChartRepo    string   `usage:"Helm repository URL for the network policy provider chart"`
+	MCPNetworkPolicyProviderChartName    string   `usage:"Helm chart name for the network policy provider chart"`
+	MCPNetworkPolicyProviderChartVersion string   `usage:"Helm chart version for the network policy provider chart"`
+	MCPNetworkPolicyProviderChartPath    string   `usage:"Local filesystem path to the network policy provider chart"`
+	MCPNetworkPolicyProviderValues       string   `usage:"YAML or JSON values blob merged into the network policy provider chart values"`
+	MCPDefaultDenyAllEgress              bool     `usage:"Default new MCP servers to deny all egress when network policy enforcement is enabled" default:"false"`
 
 	// Published artifact storage
 	ArtifactStorageProvider       string `usage:"Storage provider for published artifacts (s3, gcs, azure, custom)" name:"artifact-storage-provider" env:"OBOT_ARTIFACT_STORAGE_PROVIDER"`
@@ -186,7 +187,8 @@ type Services struct {
 	MCPSessionManager *mcp.SessionManager
 
 	// Global token storage client for MCP OAuth
-	MCPOAuthTokenStorage mcp.GlobalTokenStore
+	MCPOAuthTokenStorage       mcp.GlobalTokenStore
+	MCPOAuthReturnURLAllowlist []string
 
 	// OAuth configuration
 	OAuthServerConfig              handlers.OAuthAuthorizationServerConfig
@@ -957,6 +959,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		MCPSessionManager:              mcpSessionManager,
 		MCPOAuthTokenStorage:           mcpOAuthTokenStorage,
 		MCPOAuthClientSecretExpiration: oauthClientExpiration,
+		MCPOAuthReturnURLAllowlist:     config.MCPOAuthReturnURLAllowlist,
 		OAuthServerConfig:              oauthServerConfig,
 		AccessControlRuleHelper:        acrHelper,
 		ModelAccessPolicyHelper:        mapHelper,

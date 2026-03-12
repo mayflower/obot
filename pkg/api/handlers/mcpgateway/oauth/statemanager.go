@@ -19,20 +19,20 @@ func newStateManager(gatewayClient *client.Client) *stateManager {
 	}
 }
 
-func (sm *stateManager) store(ctx context.Context, userID, mcpID, mcpURL, oauthAuthRequestID, state, verifier string, conf *oauth2.Config) error {
-	return sm.gatewayClient.CreateMCPOAuthPendingState(ctx, userID, mcpID, mcpURL, oauthAuthRequestID, state, verifier, conf)
+func (sm *stateManager) store(ctx context.Context, userID, mcpID, mcpURL, oauthAuthRequestID, completionRedirectURL, state, verifier string, conf *oauth2.Config) error {
+	return sm.gatewayClient.CreateMCPOAuthPendingState(ctx, userID, mcpID, mcpURL, oauthAuthRequestID, completionRedirectURL, state, verifier, conf)
 }
 
-func (sm *stateManager) createToken(ctx context.Context, state, code, errorStr, errorDescription string) (string, string, error) {
+func (sm *stateManager) createToken(ctx context.Context, state, code, errorStr, errorDescription string) (string, string, string, error) {
 	ps, err := sm.gatewayClient.GetMCPOAuthPendingState(ctx, state)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get oauth state: %w", err)
+		return "", "", "", fmt.Errorf("failed to get oauth state: %w", err)
 	}
 
 	if errorStr != "" {
 		// Clean up the pending state before returning the error
 		_ = sm.gatewayClient.DeleteMCPOAuthPendingState(ctx, ps.HashedState)
-		return "", "", fmt.Errorf("error returned from oauth server: %s, %s", errorStr, errorDescription)
+		return "", "", "", fmt.Errorf("error returned from oauth server: %s, %s", errorStr, errorDescription)
 	}
 
 	conf := &oauth2.Config{
@@ -52,16 +52,16 @@ func (sm *stateManager) createToken(ctx context.Context, state, code, errorStr, 
 	token, err := conf.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", ps.Verifier))
 	if err != nil {
 		_ = sm.gatewayClient.DeleteMCPOAuthPendingState(ctx, ps.HashedState)
-		return "", "", fmt.Errorf("failed to exchange code: %w", err)
+		return "", "", "", fmt.Errorf("failed to exchange code: %w", err)
 	}
 
 	// Save the completed token
 	if err := sm.gatewayClient.ReplaceMCPOAuthToken(ctx, ps.UserID, ps.MCPID, ps.URL, ps.OAuthAuthRequestID, conf, token); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	// Delete the pending state
 	_ = sm.gatewayClient.DeleteMCPOAuthPendingState(ctx, ps.HashedState)
 
-	return ps.OAuthAuthRequestID, ps.MCPID, nil
+	return ps.OAuthAuthRequestID, ps.MCPID, ps.CompletionRedirectURL, nil
 }

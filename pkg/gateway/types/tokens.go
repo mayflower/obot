@@ -54,20 +54,21 @@ type MCPOAuthToken struct {
 }
 
 type MCPOAuthPendingState struct {
-	HashedState        string `gorm:"primaryKey"`
-	State              string
-	Verifier           string
-	UserID             string `gorm:"index:idx_pending_user_mcp"`
-	MCPID              string `gorm:"index:idx_pending_user_mcp"`
-	URL                string
-	OAuthAuthRequestID string
-	ClientID           string
-	ClientSecret       string
-	AuthURL            string
-	TokenURL           string
-	AuthStyle          oauth2.AuthStyle
-	RedirectURL        string
-	Scopes             string
-	Encrypted          bool
-	CreatedAt          time.Time
+	HashedState           string `gorm:"primaryKey"`
+	State                 string
+	Verifier              string
+	UserID                string `gorm:"index:idx_pending_user_mcp"`
+	MCPID                 string `gorm:"index:idx_pending_user_mcp"`
+	URL                   string
+	OAuthAuthRequestID    string
+	CompletionRedirectURL string
+	ClientID              string
+	ClientSecret          string
+	AuthURL               string
+	TokenURL              string
+	AuthStyle             oauth2.AuthStyle
+	RedirectURL           string
+	Scopes                string
+	Encrypted             bool
+	CreatedAt             time.Time
 }

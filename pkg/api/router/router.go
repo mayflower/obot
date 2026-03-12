@@ -66,7 +66,17 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 		return nil, err
 	}
 
-	oauthChecker := oauth.NewMCPOAuthHandlerFactory(services.ServerURL, services.MCPSessionManager, services.StorageClient, services.GatewayClient, services.MCPOAuthTokenStorage)
+	oauthChecker, err := oauth.NewMCPOAuthHandlerFactory(
+		services.ServerURL,
+		services.MCPSessionManager,
+		services.StorageClient,
+		services.GatewayClient,
+		services.MCPOAuthTokenStorage,
+		services.MCPOAuthReturnURLAllowlist,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	models := handlers.NewModelHandler(services.ModelAccessPolicyHelper)
 	mcpCatalogs := handlers.NewMCPCatalogHandler(services.DefaultMCPCatalogPath, services.ServerURL, services.MCPRuntimeBackend, services.MCPSessionManager, oauthChecker, services.GatewayClient, services.AccessControlRuleHelper)

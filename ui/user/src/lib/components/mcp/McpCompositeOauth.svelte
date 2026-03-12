@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { parseErrorContent } from '$lib/errors';
 	import Loading from '$lib/icons/Loading.svelte';
 	import { UserService, type MCPCatalogServer } from '$lib/services';
@@ -26,6 +27,7 @@
 	let pending = $state<PendingItem[]>([]);
 	let loading = $state(true);
 	let error = $state<string>('');
+	let returnURL = $derived(page.url.searchParams.get('return_url') || undefined);
 
 	const allAuthenticated = $derived(pending.length === 0);
 	const componentServers = $derived(
@@ -72,7 +74,8 @@
 		error = '';
 		try {
 			const data = await UserService.checkCompositeOAuth(compositeMcpId, {
-				oauthAuthRequestID: oauthAuthRequestId
+				oauthAuthRequestID: oauthAuthRequestId,
+				returnURL
 			});
 			pending = (data as PendingItem[]).map((d) => ({ ...d }));
 		} catch (_err) {

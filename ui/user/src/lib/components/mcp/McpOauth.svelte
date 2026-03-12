@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { parseErrorContent } from '$lib/errors';
 	import Loading from '$lib/icons/Loading.svelte';
 	import {
@@ -27,6 +28,7 @@
 	// Create AbortController for cancelling API calls
 	let abortController = $state<AbortController | null>(null);
 	let initializedListener = $state(false);
+	let returnURL = $derived(page.url.searchParams.get('return_url') || undefined);
 
 	const handleVisibilityChange = () => {
 		if (!showRefresh || loading) return;
@@ -51,6 +53,7 @@
 		try {
 			if ('mcpCatalogID' in entry) {
 				oauthURL = await AdminService.getMCPCatalogServerOAuthURL(entry.mcpCatalogID, entry.id, {
+					returnURL,
 					signal: abortController.signal
 				});
 			} else if (entity === 'workspace' && id) {

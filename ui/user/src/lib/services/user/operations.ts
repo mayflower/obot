@@ -979,12 +979,16 @@ export type PendingCompositeAuth = {
 
 export async function checkCompositeOAuth(
 	compositeMcpId: string,
-	opts?: { oauthAuthRequestID?: string; signal?: AbortSignal }
+	opts?: { oauthAuthRequestID?: string; returnURL?: string; signal?: AbortSignal }
 ): Promise<PendingCompositeAuth[]> {
-	let url = `/oauth/composite/${compositeMcpId}`;
+	const params = new URLSearchParams();
 	if (opts?.oauthAuthRequestID) {
-		url += `?oauth_auth_request=${opts.oauthAuthRequestID}`;
+		params.set('oauth_auth_request', opts.oauthAuthRequestID);
 	}
+	if (opts?.returnURL) {
+		params.set('return_url', opts.returnURL);
+	}
+	const url = `/oauth/composite/${compositeMcpId}${params.size > 0 ? `?${params.toString()}` : ''}`;
 	const response = await doGet(url, { signal: opts?.signal, dontLogErrors: true });
 
 	// If the server returns a redirect_uri, perform client-side redirect
