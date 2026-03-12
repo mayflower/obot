@@ -377,6 +377,11 @@ func (p *ProjectMCPHandler) CheckOAuth(req api.Context) error {
 }
 
 func (p *ProjectMCPHandler) GetOAuthURL(req api.Context) error {
+	completionRedirectURL, err := p.mcpOAuthChecker.ValidateCompletionRedirectURL(req.URL.Query().Get("return_url"))
+	if err != nil {
+		return err
+	}
+
 	var projectServer v1.ProjectMCPServer
 	if err := req.Get(&projectServer, req.PathValue("project_mcp_server_id")); err != nil {
 		return err
@@ -387,7 +392,7 @@ func (p *ProjectMCPHandler) GetOAuthURL(req api.Context) error {
 		return err
 	}
 
-	u, err := p.mcpOAuthChecker.CheckForMCPAuth(req, server, serverConfig, req.User.GetUID(), server.Name, "")
+	u, err := p.mcpOAuthChecker.CheckForMCPAuth(req, server, serverConfig, req.User.GetUID(), server.Name, "", completionRedirectURL)
 	if err != nil {
 		return fmt.Errorf("failed to get OAuth URL: %w", err)
 	}

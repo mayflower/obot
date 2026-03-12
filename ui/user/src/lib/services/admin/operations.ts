@@ -342,17 +342,30 @@ export async function getMCPServerById(
 export async function getMCPCatalogServerOAuthURL(
 	catalogID: string,
 	serverID: string,
-	opts?: { signal?: AbortSignal }
+	opts?: { signal?: AbortSignal; returnURL?: string }
 ): Promise<string> {
+	const params = new URLSearchParams();
+	if (opts?.returnURL) {
+		params.set('return_url', opts.returnURL);
+	}
+
 	try {
-		const response = (await doGet(`/mcp-catalogs/${catalogID}/servers/${serverID}/oauth-url`, {
-			dontLogErrors: true,
-			signal: opts?.signal
-		})) as {
+		const response = (await doGet(
+			`/mcp-catalogs/${catalogID}/servers/${serverID}/oauth-url${
+				params.size > 0 ? `?${params.toString()}` : ''
+			}`,
+			{
+				dontLogErrors: true,
+				signal: opts?.signal
+			}
+		)) as {
 			oauthURL: string;
 		};
 		return response.oauthURL;
-	} catch (_err) {
+	} catch (err) {
+		if (opts?.returnURL) {
+			throw err;
+		}
 		return '';
 	}
 }

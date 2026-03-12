@@ -122,20 +122,21 @@ type Config struct {
 	DisableUpdateCheck          bool     `usage:"Disable Obot server update checks"`
 	EnableAutonomousToolUse     bool     `usage:"Allow all chat sessions to use tools without requesting user approval" default:"false" env:"OBOT_SERVER_ENABLE_AUTONOMOUS_TOOL_USE"`
 	// Sendgrid webhook
-	SendgridWebhookUsername              string `usage:"The username for the sendgrid webhook to authenticate with"`
-	SendgridWebhookPassword              string `usage:"The password for the sendgrid webhook to authenticate with"`
-	EnableRegistryAuth                   bool   `usage:"Enable authentication for the MCP registry API" default:"false" env:"OBOT_SERVER_ENABLE_REGISTRY_AUTH"`
-	DisableLegacyChat                    bool   `usage:"Disable legacy chat" default:"true"`
-	NanobotIntegration                   bool   `usage:"Enable Nanobot integration" default:"true"`
-	EnableMessagePolicies                bool   `usage:"Enable message policies for LLM proxy content enforcement" default:"false"`
-	MCPServerSearchImage                 string `usage:"Container image for the obot MCP server" default:"ghcr.io/obot-platform/obot-mcp-server:v0.1.1"`
-	NanobotAgentImage                    string `usage:"Container image for the Nanobot agent MCP server" default:"ghcr.io/nanobot-ai/nanobot-agent:v0.0.77"`
-	MCPNetworkPolicyProviderChartRepo    string `usage:"Helm repository URL for the network policy provider chart"`
-	MCPNetworkPolicyProviderChartName    string `usage:"Helm chart name for the network policy provider chart"`
-	MCPNetworkPolicyProviderChartVersion string `usage:"Helm chart version for the network policy provider chart"`
-	MCPNetworkPolicyProviderChartPath    string `usage:"Local filesystem path to the network policy provider chart"`
-	MCPNetworkPolicyProviderValues       string `usage:"YAML or JSON values blob merged into the network policy provider chart values"`
-	MCPDefaultDenyAllEgress              bool   `usage:"Default new MCP servers to deny all egress when network policy enforcement is enabled" default:"false"`
+	SendgridWebhookUsername              string   `usage:"The username for the sendgrid webhook to authenticate with"`
+	SendgridWebhookPassword              string   `usage:"The password for the sendgrid webhook to authenticate with"`
+	EnableRegistryAuth                   bool     `usage:"Enable authentication for the MCP registry API" default:"false" env:"OBOT_SERVER_ENABLE_REGISTRY_AUTH"`
+	DisableLegacyChat                    bool     `usage:"Disable legacy chat" default:"true"`
+	NanobotIntegration                   bool     `usage:"Enable Nanobot integration" default:"true"`
+	EnableMessagePolicies                bool     `usage:"Enable message policies for LLM proxy content enforcement" default:"false"`
+	MCPServerSearchImage                 string   `usage:"Container image for the obot MCP server" default:"ghcr.io/obot-platform/obot-mcp-server:v0.1.1"`
+	NanobotAgentImage                    string   `usage:"Container image for the Nanobot agent MCP server" default:"ghcr.io/nanobot-ai/nanobot-agent:v0.0.77"`
+	MCPNetworkPolicyProviderChartRepo    string   `usage:"Helm repository URL for the network policy provider chart"`
+	MCPNetworkPolicyProviderChartName    string   `usage:"Helm chart name for the network policy provider chart"`
+	MCPNetworkPolicyProviderChartVersion string   `usage:"Helm chart version for the network policy provider chart"`
+	MCPNetworkPolicyProviderChartPath    string   `usage:"Local filesystem path to the network policy provider chart"`
+	MCPNetworkPolicyProviderValues       string   `usage:"YAML or JSON values blob merged into the network policy provider chart values"`
+	MCPDefaultDenyAllEgress              bool     `usage:"Default new MCP servers to deny all egress when network policy enforcement is enabled" default:"false"`
+	MCPOAuthReturnURLAllowlist           []string `usage:"Allowed absolute URL prefixes for MCP OAuth return_url redirects" env:"OBOT_MCP_OAUTH_RETURN_URL_ALLOWLIST"`
 
 	// Published artifact storage
 	ArtifactStorageProvider       string `usage:"Storage provider for published artifacts (s3, gcs, azure, custom)" name:"artifact-storage-provider" env:"OBOT_ARTIFACT_STORAGE_PROVIDER"`
@@ -217,7 +218,8 @@ type Services struct {
 	MCPLoader *mcp.SessionManager
 
 	// Global token storage client for MCP OAuth
-	MCPOAuthTokenStorage mcp.GlobalTokenStore
+	MCPOAuthTokenStorage       mcp.GlobalTokenStore
+	MCPOAuthReturnURLAllowlist []string
 
 	// OAuth configuration
 	OAuthServerConfig handlers.OAuthAuthorizationServerConfig
@@ -1084,6 +1086,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		DefaultSkillRepoRef:         config.DefaultSkillRepoRef,
 		MCPLoader:                   mcpSessionManager,
 		MCPOAuthTokenStorage:        mcpOAuthTokenStorage,
+		MCPOAuthReturnURLAllowlist:  config.MCPOAuthReturnURLAllowlist,
 		OAuthServerConfig: handlers.OAuthAuthorizationServerConfig{
 			Issuer:                            config.Hostname,
 			AuthorizationEndpoint:             fmt.Sprintf("%s/oauth/authorize", config.Hostname),

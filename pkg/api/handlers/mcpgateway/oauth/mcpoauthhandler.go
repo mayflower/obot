@@ -22,26 +22,37 @@ import (
 )
 
 type MCPOAuthHandlerFactory struct {
-	baseURL           string
-	mcpSessionManager *mcp.SessionManager
-	client            kclient.Client
-	gptscript         *gptscript.GPTScript
-	stateMgr          *stateManager
-	tokenStore        mcp.GlobalTokenStore
+	baseURL            string
+	mcpSessionManager  *mcp.SessionManager
+	client             kclient.Client
+	gptscript          *gptscript.GPTScript
+	stateMgr           *stateManager
+	tokenStore         mcp.GlobalTokenStore
+	returnURLValidator *completionRedirectValidator
 }
 
-func NewMCPOAuthHandlerFactory(baseURL string, sessionManager *mcp.SessionManager, client kclient.Client, gptClient *gptscript.GPTScript, gatewayClient *client.Client, globalTokenStore mcp.GlobalTokenStore) *MCPOAuthHandlerFactory {
-	return &MCPOAuthHandlerFactory{
-		baseURL:           baseURL,
-		mcpSessionManager: sessionManager,
-		client:            client,
-		gptscript:         gptClient,
-		stateMgr:          newStateManager(gatewayClient),
-		tokenStore:        globalTokenStore,
+func NewMCPOAuthHandlerFactory(baseURL string, sessionManager *mcp.SessionManager, client kclient.Client, gptClient *gptscript.GPTScript, gatewayClient *client.Client, globalTokenStore mcp.GlobalTokenStore, returnURLAllowlist []string) (*MCPOAuthHandlerFactory, error) {
+	validator, err := newCompletionRedirectValidator(returnURLAllowlist)
+	if err != nil {
+		return nil, err
 	}
+
+	return &MCPOAuthHandlerFactory{
+		baseURL:            baseURL,
+		mcpSessionManager:  sessionManager,
+		client:             client,
+		gptscript:          gptClient,
+		stateMgr:           newStateManager(gatewayClient),
+		tokenStore:         globalTokenStore,
+		returnURLValidator: validator,
+	}, nil
 }
 
-func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.MCPServer, mcpServerConfig mcp.ServerConfig, userID, mcpID, oauthAppAuthRequestID string) (string, error) {
+func (f *MCPOAuthHandlerFactory) ValidateCompletionRedirectURL(raw string) (string, error) {
+	return f.returnURLValidator.Validate(raw)
+}
+
+func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.MCPServer, mcpServerConfig mcp.ServerConfig, userID, mcpID, oauthAppAuthRequestID, completionRedirectURL string) (string, error) {
 	if mcpServer.Spec.Manifest.Runtime == types.RuntimeComposite {
 		var componentServers v1.MCPServerList
 		if err := f.client.List(req.Context(), &componentServers,
@@ -74,7 +85,7 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 				continue
 			}
 
-			u, err := f.CheckForMCPAuth(req, componentServer, componentConfig, userID, componentServer.Name, oauthAppAuthRequestID)
+			u, err := f.CheckForMCPAuth(req, componentServer, componentConfig, userID, componentServer.Name, oauthAppAuthRequestID, completionRedirectURL)
 			if err != nil {
 				if req.Context().Err() != nil {
 					return "", fmt.Errorf("failed to check component server OAuth: %w", req.Context().Err())
@@ -88,7 +99,7 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 					return fmt.Sprintf("%s/auth/mcp/composite/%s?oauth_auth_request=%s", f.baseURL, mcpID, oauthAppAuthRequestID), nil
 				}
 
-				return fmt.Sprintf("%s/auth/mcp/composite/%s", f.baseURL, mcpID), nil
+				return appendReturnURL(fmt.Sprintf("%s/auth/mcp/composite/%s", f.baseURL, mcpID), completionRedirectURL), nil
 			}
 		}
 
@@ -101,7 +112,7 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 	}
 
 	// Remote server, check for OAuth directly
-	oauthHandler := f.newMCPOAuthHandler(userID, mcpID, mcpServerConfig.URL, oauthAppAuthRequestID)
+	oauthHandler := f.newMCPOAuthHandler(userID, mcpID, mcpServerConfig.URL, oauthAppAuthRequestID, completionRedirectURL)
 	errChan := make(chan error, 1)
 
 	go func() {
@@ -135,26 +146,28 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 }
 
 type mcpOAuthHandler struct {
-	client             kclient.Client
-	gptscript          *gptscript.GPTScript
-	stateMgr           *stateManager
-	mcpID              string
-	mcpURL             string
-	userID             string
-	oauthAuthRequestID string
-	urlChan            chan string
+	client                kclient.Client
+	gptscript             *gptscript.GPTScript
+	stateMgr              *stateManager
+	mcpID                 string
+	mcpURL                string
+	userID                string
+	oauthAuthRequestID    string
+	completionRedirectURL string
+	urlChan               chan string
 }
 
-func (f *MCPOAuthHandlerFactory) newMCPOAuthHandler(userID, mcpID, mcpURL, oauthAuthRequestID string) *mcpOAuthHandler {
+func (f *MCPOAuthHandlerFactory) newMCPOAuthHandler(userID, mcpID, mcpURL, oauthAuthRequestID, completionRedirectURL string) *mcpOAuthHandler {
 	return &mcpOAuthHandler{
-		client:             f.client,
-		gptscript:          f.gptscript,
-		stateMgr:           f.stateMgr,
-		userID:             userID,
-		mcpID:              mcpID,
-		mcpURL:             mcpURL,
-		oauthAuthRequestID: oauthAuthRequestID,
-		urlChan:            make(chan string, 1),
+		client:                f.client,
+		gptscript:             f.gptscript,
+		stateMgr:              f.stateMgr,
+		userID:                userID,
+		mcpID:                 mcpID,
+		mcpURL:                mcpURL,
+		oauthAuthRequestID:    oauthAuthRequestID,
+		completionRedirectURL: completionRedirectURL,
+		urlChan:               make(chan string, 1),
 	}
 }
 
@@ -181,7 +194,7 @@ func (m *mcpOAuthHandler) NewState(ctx context.Context, conf *oauth2.Config, ver
 	// callback arrives via a separate HTTP endpoint (oauthCallback) which looks up
 	// the pending state from the DB directly.
 	ch := make(chan nmcp.CallbackPayload)
-	return state, ch, m.stateMgr.store(ctx, m.userID, m.mcpID, m.mcpURL, m.oauthAuthRequestID, state, verifier, conf)
+	return state, ch, m.stateMgr.store(ctx, m.userID, m.mcpID, m.mcpURL, m.oauthAuthRequestID, m.completionRedirectURL, state, verifier, conf)
 }
 
 func (m *mcpOAuthHandler) Lookup(ctx context.Context, authServerURL string) (string, string, error) {

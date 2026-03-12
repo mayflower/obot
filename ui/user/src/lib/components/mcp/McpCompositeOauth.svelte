@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { parseErrorContent } from '$lib/errors';
 	import { ChatService, type MCPCatalogServer } from '$lib/services';
 	import { LoaderCircle, Server } from 'lucide-svelte';
@@ -24,6 +25,7 @@
 	let pending = $state<PendingItem[]>([]);
 	let loading = $state(true);
 	let error = $state<string>('');
+	let returnURL = $derived(page.url.searchParams.get('return_url') || undefined);
 
 	const allAuthenticated = $derived(pending.length === 0);
 	const componentServers = $derived(
@@ -70,7 +72,8 @@
 		error = '';
 		try {
 			const data = await ChatService.checkCompositeOAuth(compositeMcpId, {
-				oauthAuthRequestID: oauthAuthRequestId
+				oauthAuthRequestID: oauthAuthRequestId,
+				returnURL
 			});
 			pending = (data as PendingItem[]).map((d) => ({ ...d }));
 		} catch (_err) {

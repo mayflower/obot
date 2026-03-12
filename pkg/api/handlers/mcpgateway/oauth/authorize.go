@@ -313,7 +313,7 @@ func (h *handler) callback(req api.Context) error {
 			return err
 		}
 
-		u, err := h.oauthChecker.CheckForMCPAuth(req, mcpServer, mcpServerConfig, req.User.GetUID(), mcpID, oauthAppAuthRequest.Name)
+		u, err := h.oauthChecker.CheckForMCPAuth(req, mcpServer, mcpServerConfig, req.User.GetUID(), mcpID, oauthAppAuthRequest.Name, "")
 		if err != nil {
 			redirectWithAuthorizeError(req, oauthAppAuthRequest.Spec.RedirectURI, Error{
 				Code:        ErrServerError,
@@ -337,15 +337,32 @@ func (h *handler) callback(req api.Context) error {
 
 // oauthCallback handles the second-level third-party OAuth for MCP servers.
 func (h *handler) oauthCallback(req api.Context) error {
-	oauthAuthRequestID, mcpServerID, err := h.oauthChecker.stateMgr.createToken(req.Context(), req.URL.Query().Get("state"), req.URL.Query().Get("code"), req.URL.Query().Get("error"), req.URL.Query().Get("error_description"))
+	oauthAuthRequestID, mcpServerID, completionRedirectURL, err := h.oauthChecker.stateMgr.createToken(req.Context(), req.URL.Query().Get("state"), req.URL.Query().Get("code"), req.URL.Query().Get("error"), req.URL.Query().Get("error_description"))
 	if err != nil {
 		return types.NewErrHTTP(http.StatusBadRequest, err.Error())
 	}
 
+	// Check if the MCP server is a component of a composite; only finalize if it's not
+	var server v1.MCPServer
+	if err := req.Get(&server, mcpServerID); err != nil {
+		if oauthAuthRequestID == "" {
+			return types.NewErrHTTP(http.StatusInternalServerError, err.Error())
+		}
+
+		var oauthAppAuthRequest v1.OAuthAuthRequest
+		if getErr := req.Get(&oauthAppAuthRequest, oauthAuthRequestID); getErr != nil {
+			return getErr
+		}
+
+		redirectWithAuthorizeError(req, oauthAppAuthRequest.Spec.RedirectURI, Error{
+			Code:        ErrServerError,
+			Description: err.Error(),
+		})
+		return nil
+	}
+
 	if oauthAuthRequestID == "" {
-		// If there is no OAuth request object, then MCP OAuth wasn't started by OAuth; likely the UI kicked it off.
-		// Redirect to the configured auth complete URL (defaults to /login_complete).
-		http.Redirect(req.ResponseWriter, req.Request, h.authCompleteURL, http.StatusFound)
+		http.Redirect(req.ResponseWriter, req.Request, uiOAuthCompletionRedirect(h.authCompleteURL, completionRedirectURL, server), http.StatusFound)
 		return nil
 	}
 
@@ -362,16 +379,6 @@ func (h *handler) oauthCallback(req api.Context) error {
 		redirectWithAuthorizeError(req, oauthAppAuthRequest.Spec.RedirectURI, Error{
 			Code:        ErrAccessDenied,
 			Description: "user is not authenticated",
-		})
-		return nil
-	}
-
-	// Check if the MCP server is a component of a composite; only finalize if it's not
-	var server v1.MCPServer
-	if err := req.Get(&server, mcpServerID); err != nil {
-		redirectWithAuthorizeError(req, oauthAppAuthRequest.Spec.RedirectURI, Error{
-			Code:        ErrServerError,
-			Description: err.Error(),
 		})
 		return nil
 	}

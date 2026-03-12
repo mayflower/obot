@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { parseErrorContent } from '$lib/errors';
+	import { page } from '$app/state';
 	import {
 		AdminService,
 		ChatService,
@@ -29,6 +30,7 @@
 	// Create AbortController for cancelling API calls
 	let abortController = $state<AbortController | null>(null);
 	let initializedListener = $state(false);
+	let returnURL = $derived(page.url.searchParams.get('return_url') || undefined);
 
 	const handleVisibilityChange = () => {
 		if (!showRefresh || loading) return;
@@ -57,19 +59,23 @@
 					project.id,
 					entry.id,
 					{
+						returnURL,
 						signal: abortController.signal
 					}
 				);
 			} else if ('mcpCatalogID' in entry) {
 				oauthURL = await AdminService.getMCPCatalogServerOAuthURL(entry.mcpCatalogID, entry.id, {
+					returnURL,
 					signal: abortController.signal
 				});
 			} else if (entity === 'workspace' && id) {
 				oauthURL = await ChatService.getWorkspaceMcpServerOauthURL(id, entry.id, {
+					returnURL,
 					signal: abortController.signal
 				});
 			} else {
 				oauthURL = await ChatService.getMcpServerOauthURL(entry.id, {
+					returnURL,
 					signal: abortController.signal
 				});
 			}

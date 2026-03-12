@@ -1584,17 +1584,28 @@ export async function deleteMcpServerInstance(id: string): Promise<void> {
 // 412 means oauth is needed
 export async function getMcpServerOauthURL(
 	id: string,
-	opts?: { signal?: AbortSignal }
+	opts?: { signal?: AbortSignal; returnURL?: string }
 ): Promise<string> {
+	const params = new URLSearchParams();
+	if (opts?.returnURL) {
+		params.set('return_url', opts.returnURL);
+	}
+
 	try {
-		const response = (await doGet(`/mcp-servers/${id}/oauth-url`, {
-			dontLogErrors: true,
-			signal: opts?.signal
-		})) as {
+		const response = (await doGet(
+			`/mcp-servers/${id}/oauth-url${params.size > 0 ? `?${params.toString()}` : ''}`,
+			{
+				dontLogErrors: true,
+				signal: opts?.signal
+			}
+		)) as {
 			oauthURL: string;
 		};
 		return response.oauthURL;
-	} catch (_err) {
+	} catch (err) {
+		if (opts?.returnURL) {
+			throw err;
+		}
 		return '';
 	}
 }
@@ -1620,18 +1631,28 @@ export async function getProjectMcpServerOauthURL(
 	assistantID: string,
 	projectID: string,
 	mcpServerID: string,
-	opts?: { signal?: AbortSignal; dontLogErrors?: boolean }
+	opts?: { signal?: AbortSignal; dontLogErrors?: boolean; returnURL?: string }
 ): Promise<string> {
+	const params = new URLSearchParams();
+	if (opts?.returnURL) {
+		params.set('return_url', opts.returnURL);
+	}
+
 	try {
 		const response = (await doGet(
-			`/assistants/${assistantID}/projects/${projectID}/mcpservers/${mcpServerID}/oauth-url`,
+			`/assistants/${assistantID}/projects/${projectID}/mcpservers/${mcpServerID}/oauth-url${
+				params.size > 0 ? `?${params.toString()}` : ''
+			}`,
 			{
 				dontLogErrors: opts?.dontLogErrors ?? false,
 				signal: opts?.signal
 			}
 		)) as { oauthURL: string };
 		return response.oauthURL;
-	} catch (_) {
+	} catch (err) {
+		if (opts?.returnURL || opts?.dontLogErrors) {
+			throw err;
+		}
 		return '';
 	}
 }
@@ -2031,17 +2052,30 @@ export async function fetchWorkspaceIDForProfile(
 export async function getWorkspaceMcpServerOauthURL(
 	workspaceID: string,
 	id: string,
-	opts?: { signal?: AbortSignal }
+	opts?: { signal?: AbortSignal; returnURL?: string }
 ): Promise<string> {
+	const params = new URLSearchParams();
+	if (opts?.returnURL) {
+		params.set('return_url', opts.returnURL);
+	}
+
 	try {
-		const response = (await doGet(`/workspaces/${workspaceID}/servers/${id}/oauth-url`, {
-			dontLogErrors: true,
-			signal: opts?.signal
-		})) as {
+		const response = (await doGet(
+			`/workspaces/${workspaceID}/servers/${id}/oauth-url${
+				params.size > 0 ? `?${params.toString()}` : ''
+			}`,
+			{
+				dontLogErrors: true,
+				signal: opts?.signal
+			}
+		)) as {
 			oauthURL: string;
 		};
 		return response.oauthURL;
-	} catch (_err) {
+	} catch (err) {
+		if (opts?.returnURL) {
+			throw err;
+		}
 		return '';
 	}
 }
@@ -2138,11 +2172,19 @@ export type PendingCompositeAuth = {
 
 export async function checkCompositeOAuth(
 	compositeMcpId: string,
-	opts?: { oauthAuthRequestID?: string; signal?: AbortSignal }
+	opts?: { oauthAuthRequestID?: string; signal?: AbortSignal; returnURL?: string }
 ): Promise<PendingCompositeAuth[]> {
-	let url = `/oauth/composite/${compositeMcpId}`;
+	const query = new URLSearchParams();
 	if (opts?.oauthAuthRequestID) {
-		url += `?oauth_auth_request=${opts.oauthAuthRequestID}`;
+		query.set('oauth_auth_request', opts.oauthAuthRequestID);
+	}
+	if (opts?.returnURL) {
+		query.set('return_url', opts.returnURL);
+	}
+
+	let url = `/oauth/composite/${compositeMcpId}`;
+	if (query.size > 0) {
+		url += `?${query.toString()}`;
 	}
 	const response = await doGet(url, { signal: opts?.signal, dontLogErrors: true });
 
