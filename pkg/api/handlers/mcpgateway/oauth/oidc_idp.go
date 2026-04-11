@@ -14,7 +14,7 @@ import (
 // (Dex, Keycloak, Auth0, Okta, etc.). It implements the ExternalIdPValidator interface.
 type OIDCIdPValidator struct {
 	issuer         string
-	clientID       string
+	allowedAudiences []string
 	providerName   string
 	authProvider   string
 	allowedDomains []string
@@ -25,15 +25,24 @@ type OIDCIdPValidator struct {
 
 // NewOIDCIdPValidator creates a new generic OIDC validator from environment configuration.
 // Returns an error if OBOT_OIDC_ISSUER or OBOT_OIDC_CLIENT_ID are not configured.
+//
+// OBOT_OIDC_CLIENT_ID may be a comma-separated list of client IDs; the
+// validator accepts a token whose `aud` claim matches any entry in the list.
+// This lets a single Obot deployment serve multiple downstream OAuth clients
+// (e.g. a portal client and a CLI client) that share the same OIDC issuer.
 func NewOIDCIdPValidator() (*OIDCIdPValidator, error) {
 	issuer := os.Getenv("OBOT_OIDC_ISSUER")
 	if issuer == "" {
 		return nil, fmt.Errorf("OBOT_OIDC_ISSUER not configured")
 	}
 
-	clientID := os.Getenv("OBOT_OIDC_CLIENT_ID")
-	if clientID == "" {
+	rawClientIDs := os.Getenv("OBOT_OIDC_CLIENT_ID")
+	if rawClientIDs == "" {
 		return nil, fmt.Errorf("OBOT_OIDC_CLIENT_ID not configured")
+	}
+	allowedAudiences := splitAndTrim(rawClientIDs)
+	if len(allowedAudiences) == 0 {
+		return nil, fmt.Errorf("OBOT_OIDC_CLIENT_ID has no non-empty entries")
 	}
 
 	providerName := os.Getenv("OBOT_OIDC_PROVIDER_NAME")
@@ -47,24 +56,54 @@ func NewOIDCIdPValidator() (*OIDCIdPValidator, error) {
 	}
 
 	validator := &OIDCIdPValidator{
-		issuer:       strings.TrimRight(issuer, "/"),
-		clientID:     clientID,
-		providerName: providerName,
-		authProvider: authProvider,
+		issuer:           strings.TrimRight(issuer, "/"),
+		allowedAudiences: allowedAudiences,
+		providerName:     providerName,
+		authProvider:     authProvider,
 	}
 
 	if domains := os.Getenv("OBOT_OIDC_ALLOWED_DOMAINS"); domains != "" {
-		validator.allowedDomains = strings.Split(domains, ",")
-		for i := range validator.allowedDomains {
-			validator.allowedDomains[i] = strings.TrimSpace(validator.allowedDomains[i])
-		}
+		validator.allowedDomains = splitAndTrim(domains)
 	}
 
 	return validator, nil
 }
 
+// splitAndTrim splits a comma-separated string and drops empty entries.
+func splitAndTrim(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// audienceMatches reports whether any value in the token audience appears
+// in the allowed list. Empty allowed lists never match.
+func audienceMatches(tokenAudience, allowed []string) bool {
+	if len(allowed) == 0 || len(tokenAudience) == 0 {
+		return false
+	}
+	for _, want := range allowed {
+		for _, got := range tokenAudience {
+			if got == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // getVerifier lazily initializes the OIDC verifier on first use.
 // This avoids startup failures if the OIDC provider isn't reachable yet.
+//
+// The verifier is created with SkipClientIDCheck=true because go-oidc's
+// Config.ClientID only accepts a single string. Audience validation is done
+// manually in Validate() against allowedAudiences so multiple downstream
+// OAuth clients can share the same Obot deployment.
 func (v *OIDCIdPValidator) getVerifier(ctx context.Context) (*oidc.IDTokenVerifier, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -79,7 +118,7 @@ func (v *OIDCIdPValidator) getVerifier(ctx context.Context) (*oidc.IDTokenVerifi
 	}
 
 	v.verifier = provider.Verifier(&oidc.Config{
-		ClientID: v.clientID,
+		SkipClientIDCheck: true,
 	})
 
 	return v.verifier, nil
@@ -95,6 +134,12 @@ func (v *OIDCIdPValidator) Validate(ctx context.Context, tokenString string) (*E
 	idToken, err := verifier.Verify(ctx, tokenString)
 	if err != nil {
 		return nil, fmt.Errorf("token validation failed: %w", err)
+	}
+
+	// Manual audience check (go-oidc verifier was created with
+	// SkipClientIDCheck=true to support multiple allowed audiences).
+	if !audienceMatches(idToken.Audience, v.allowedAudiences) {
+		return nil, fmt.Errorf("token audience %v does not match any allowed audience %v", idToken.Audience, v.allowedAudiences)
 	}
 
 	var claims struct {
