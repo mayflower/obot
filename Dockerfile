@@ -47,7 +47,7 @@ FROM ${ENCRYPTION_BINS_IMAGE} AS encryption-bins
 FROM ${ENTERPRISE_IMAGE} AS enterprise-providers
 RUN mkdir -p /obot-providers
 
-FROM final-base AS final
+FROM final-base AS final-built
 ENV POSTGRES_USER=obot
 ENV POSTGRES_PASSWORD=obot
 ENV POSTGRES_DB=obot
@@ -81,6 +81,41 @@ ENV HOME=/data
 ENV XDG_CACHE_HOME=/data/cache
 ENV TERM=vt100
 ENV OBOT_CONTAINER_ENV=true
+WORKDIR /data
+VOLUME /data
+ENTRYPOINT ["run.sh"]
+
+# Re-emit the image into a fresh base to drop the /dev/* character device
+# nodes that wolfi-baselayout's apk install scripts mknod() into the rootfs
+# (/dev/console, /dev/null, /dev/random, /dev/urandom, /dev/zero). OCI
+# runtimes (runc, gVisor, kata) bind-mount /dev/* themselves at container
+# start, so the in-image device nodes are dead weight that only exist to
+# trip up snapshotter extraction on hosts whose container runtime starts
+# without CAP_MKNOD (e.g. NixOS-hardened k3s).
+#
+# BuildKit's COPY deliberately skips character/block devices and FIFOs, so
+# `COPY --from=final-built / /` rebuilds the rootfs as a single ordinary
+# layer. Mode bits (including setuid on gosu) and security xattrs (file
+# capabilities on postgres helpers) are preserved by COPY's tar pipe.
+#
+# Tradeoff: the resulting image is a single ~1 GB layer with no per-layer
+# pull caching. Acceptable for our deployment scale.
+FROM scratch AS final
+COPY --from=final-built / /
+ENV POSTGRES_USER=obot \
+    POSTGRES_PASSWORD=obot \
+    POSTGRES_DB=obot \
+    PGDATA=/data/postgresql \
+    LANG=en_US.UTF-8 \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin:/usr/lib/libreoffice/program \
+    HOME=/data \
+    XDG_CACHE_HOME=/data/cache \
+    OBOT_SERVER_AGENTS_DIR=/agents \
+    TERM=vt100 \
+    OBOT_CONTAINER_ENV=true \
+    OBOT_SERVER_DEFAULT_MCPCATALOG_PATH=https://github.com/obot-platform/mcp-catalog \
+    OBOT_SERVER_DEFAULT_SYSTEM_MCPCATALOG_PATH=https://github.com/obot-platform/system-mcp-catalog
 WORKDIR /data
 VOLUME /data
 ENTRYPOINT ["run.sh"]
