@@ -93,15 +93,15 @@ ENTRYPOINT ["run.sh"]
 # trip up snapshotter extraction on hosts whose container runtime starts
 # without CAP_MKNOD (e.g. NixOS-hardened k3s).
 #
-# BuildKit's COPY deliberately skips character/block devices and FIFOs, so
-# `COPY --from=final-built / /` rebuilds the rootfs as a single ordinary
-# layer. Mode bits (including setuid on gosu) and security xattrs (file
-# capabilities on postgres helpers) are preserved by COPY's tar pipe.
+# `COPY --from=stage` preserves character/block devices when the source is
+# another build stage (BuildKit's snapshotter walks the stage's effective
+# FS verbatim), so we explicitly exclude `dev/*`. The /dev/ directory
+# itself remains so the OCI runtime can tmpfs-mount onto it at start.
 #
 # Tradeoff: the resulting image is a single ~1 GB layer with no per-layer
 # pull caching. Acceptable for our deployment scale.
 FROM scratch AS final
-COPY --from=final-built / /
+COPY --from=final-built --exclude=dev/* / /
 ENV POSTGRES_USER=obot \
     POSTGRES_PASSWORD=obot \
     POSTGRES_DB=obot \
