@@ -284,7 +284,7 @@ func (t *TokenService) audienceAllowsMCPConnectRequest(audience string, req *htt
 	if audiencePath == "" {
 		audiencePath = "/"
 	}
-	if !strings.HasPrefix(audiencePath, "/mcp-connect/") {
+	if audiencePath != "/mcp-connect" && !strings.HasPrefix(audiencePath, "/mcp-connect/") {
 		return false
 	}
 

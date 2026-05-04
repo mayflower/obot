@@ -4,7 +4,7 @@
 
 The branch introduces useful RFC 8693 and external IdP support, but the new stateless JWT path is broader than the resource-scoped token-exchange model implies. The highest-risk issue is that the gateway now accepts any Obot-signed JWT as API authentication without validating audience or token purpose. Combined with the new external IdP exchange and MCP proxy JWT minting, this can turn resource-specific or downstream-only tokens into general Obot bearer tokens if they are obtained or replayed.
 
-Remediation status: fixed in the current working tree. Token purpose and audience are now enforced at API/gateway authentication boundaries, external IdP exchange is bound to validated `/mcp-connect/{mcp_id}` resources, and external IdP provider defaults now fail closed unless an operator configures a tenant/domain policy or an explicit allow-all override.
+Remediation status: fixed in the current working tree. Token purpose and audience are now enforced at API/gateway authentication boundaries, external IdP exchange is bound to validated MCP Gateway resources (`/mcp-connect` or `/mcp-connect/{mcp_id}`), and external IdP provider defaults now fail closed unless an operator configures a tenant/domain policy or an explicit allow-all override.
 
 Focused tests run:
 
@@ -73,7 +73,7 @@ jwtClaims := jwt.MapClaims{
 ```
 
 - Impact: The `id_token` path returns before the normal `requested_token_type` and `resource` checks. An allowlisted OAuth client can exchange a valid IdP token for a one-hour JWT with `aud` set to the whole Obot base URL, with role groups embedded. This is broader than a resource-bound RFC 8693 exchange and makes client/resource confusion more likely.
-- Fix: Validate `requested_token_type` and `resource` before branching on `subject_token_type`, or pass them into `doExternalIdPTokenExchange`. Bind the issued token to the requested resource and the OAuth client policy, set `MCPID`/scope where applicable, and reject requests without an explicit allowed resource. If the intended feature is general login by external IdP, expose it as a distinct, documented grant/endpoint with a separate allowlist.
+- Fix: Validate `requested_token_type` and `resource` before branching on `subject_token_type`, or pass them into `doExternalIdPTokenExchange`. Bind the issued token to the requested MCP Gateway resource and the OAuth client policy, using `/mcp-connect` for gateway-scoped MCP access or `/mcp-connect/{mcp_id}` for a single-server token. Set `MCPID` where applicable, and reject requests without an explicit allowed resource. If the intended feature is general login by external IdP, expose it as a distinct, documented grant/endpoint with a separate allowlist.
 - Mitigation: Configure `OBOT_EXTERNAL_IDP_ALLOWED_CLIENTS` narrowly and do not allow public clients to use this flow until token audience/resource checks are enforced.
 - False positive notes: If this branch intentionally wants a generic Obot login token, the implementation should still make that explicit in config and tests instead of silently treating an RFC 8693 exchange as a general auth flow.
 
