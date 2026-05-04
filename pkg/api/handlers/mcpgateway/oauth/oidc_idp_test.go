@@ -92,6 +92,7 @@ func TestNewOIDCIdPValidator_MultiAudience(t *testing.T) {
 	t.Setenv("OBOT_OIDC_ISSUER", "https://id.example.com")
 	t.Setenv("OBOT_OIDC_CLIENT_ID", "maistack-research,langopen-cli")
 	t.Setenv("OBOT_OIDC_PROVIDER_NAME", "dex")
+	t.Setenv("OBOT_OIDC_ALLOWED_DOMAINS", "example.com")
 
 	v, err := NewOIDCIdPValidator()
 	if err != nil {

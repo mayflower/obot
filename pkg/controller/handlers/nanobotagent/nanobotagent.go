@@ -308,6 +308,7 @@ func (h *Handler) ensureCredentials(ctx context.Context, req router.Request, res
 		UserID:     agent.Spec.UserID,
 		UserGroups: types.RoleBasic.Groups(),
 		Namespace:  agent.Namespace,
+		TokenType:  persistent.TokenTypeGatewayAPI,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to generate token: %w", err)

@@ -24,9 +24,7 @@ type ExternalIdPConfig struct {
 
 // NewExternalIdPConfig creates configuration from environment variables.
 func NewExternalIdPConfig() ExternalIdPConfig {
-	config := ExternalIdPConfig{
-		AutoProvision: true, // Default to enabled for development convenience
-	}
+	config := ExternalIdPConfig{}
 
 	// Parse allowed client IDs
 	if clients := os.Getenv("OBOT_EXTERNAL_IDP_ALLOWED_CLIENTS"); clients != "" {
@@ -38,10 +36,19 @@ func NewExternalIdPConfig() ExternalIdPConfig {
 
 	// Parse auto-provision setting
 	if autoProvision := os.Getenv("OBOT_EXTERNAL_IDP_AUTO_PROVISION"); autoProvision != "" {
-		config.AutoProvision = autoProvision == "true" || autoProvision == "1"
+		config.AutoProvision = envBool("OBOT_EXTERNAL_IDP_AUTO_PROVISION")
 	}
 
 	return config
+}
+
+func envBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // IsClientAllowed checks if a client ID is allowed to use external IdP token exchange.

@@ -16,6 +16,7 @@ import (
 	"github.com/obot-platform/obot/pkg/api/handlers"
 	"github.com/obot-platform/obot/pkg/controller/handlers/systemmcpserver"
 	gateway "github.com/obot-platform/obot/pkg/gateway/client"
+	"github.com/obot-platform/obot/pkg/jwt/persistent"
 	"github.com/obot-platform/obot/pkg/mcp"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
@@ -64,12 +65,13 @@ func (h *Handler) Proxy(req api.Context) error {
 	}
 
 	claims := jwt.MapClaims{
-		"aud":   audience,
-		"iss":   issuer,
-		"exp":   float64(now.Add(time.Hour + 15*time.Minute).Unix()),
-		"iat":   float64(now.Unix()),
-		"sub":   req.User.GetUID(),
-		"MCPID": serverConfig.MCPServerName,
+		"aud":       audience,
+		"iss":       issuer,
+		"exp":       float64(now.Add(time.Hour + 15*time.Minute).Unix()),
+		"iat":       float64(now.Unix()),
+		"sub":       req.User.GetUID(),
+		"MCPID":     serverConfig.MCPServerName,
+		"TokenType": string(persistent.TokenTypeMCPProxy),
 	}
 
 	_, token, err := h.tokenService.NewTokenWithClaims(req.Context(), claims)

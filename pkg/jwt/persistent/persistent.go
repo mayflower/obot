@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,6 +44,16 @@ func NewTokenService(serverURL string, gatewayClient *client.Client) (*TokenServ
 	}
 	return t, nil
 }
+
+type TokenType string
+
+const (
+	TokenTypeRun         TokenType = "run"
+	TokenTypeWorkflow    TokenType = "workflow"
+	TokenTypeOAuthAccess TokenType = "oauth_access"
+	TokenTypeGatewayAPI  TokenType = "gateway_api"
+	TokenTypeMCPProxy    TokenType = "mcp_proxy"
+)
 
 // EnsureJWK ensures that the JWK is created and stored. It should only be called in a controller post-start hook which only allows one to be run at a time.
 func (t *TokenService) EnsureJWK(ctx context.Context) error {
@@ -164,6 +175,9 @@ func (t *TokenService) AuthenticateRequest(req *http.Request) (*authenticator.Re
 	if err != nil {
 		return nil, false, nil
 	}
+	if !t.ValidForRequest(tokenContext, req) {
+		return nil, false, nil
+	}
 
 	extra := map[string][]string{
 		"email":                   {tokenContext.UserEmail},
@@ -201,6 +215,63 @@ func (t *TokenService) AuthenticateRequest(req *http.Request) (*authenticator.Re
 			Extra:  extra,
 		},
 	}, true, nil
+}
+
+func (t *TokenService) ValidForRequest(tokenContext *TokenContext, req *http.Request) bool {
+	if tokenContext == nil {
+		return false
+	}
+
+	switch tokenContext.TokenType {
+	case TokenTypeMCPProxy:
+		return false
+	case TokenTypeOAuthAccess, "":
+		return t.audienceAllowsMCPConnectRequest(tokenContext.Audience, req)
+	case TokenTypeGatewayAPI, TokenTypeRun, TokenTypeWorkflow:
+		return sameURLOrigin(tokenContext.Audience, t.serverURL)
+	default:
+		return false
+	}
+}
+
+func (t *TokenService) audienceAllowsMCPConnectRequest(audience string, req *http.Request) bool {
+	if audience == "" || req == nil || req.URL == nil {
+		return false
+	}
+
+	audienceURL, err := url.Parse(audience)
+	if err != nil {
+		return false
+	}
+	if !sameURLOrigin(audience, t.serverURL) {
+		return false
+	}
+
+	audiencePath := audienceURL.EscapedPath()
+	if audiencePath == "" {
+		audiencePath = "/"
+	}
+	if !strings.HasPrefix(audiencePath, "/mcp-connect/") {
+		return false
+	}
+
+	requestPath := req.URL.EscapedPath()
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	return requestPath == audiencePath || strings.HasPrefix(requestPath, strings.TrimRight(audiencePath, "/")+"/")
+}
+
+func sameURLOrigin(a, b string) bool {
+	aURL, err := url.Parse(a)
+	if err != nil {
+		return false
+	}
+	bURL, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(aURL.Scheme, bURL.Scheme) && strings.EqualFold(aURL.Host, bURL.Host)
 }
 
 func (t *TokenService) DecodeToken(ctx context.Context, token string) (*TokenContext, error) {

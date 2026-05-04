@@ -42,29 +42,31 @@ func NewEntraIdPValidator() (*EntraIdPValidator, error) {
 	}
 
 	tenantID := os.Getenv("OBOT_ENTRA_TENANT_ID")
-	if tenantID == "" {
-		tenantID = "common" // Multi-tenant by default
-	}
+	allowAnyTenant := envBool("OBOT_ENTRA_ALLOW_ANY_TENANT")
 
 	validator := &EntraIdPValidator{
 		clientID: clientID,
-		tenantID: tenantID,
+		tenantID: strings.TrimSpace(tenantID),
 	}
 
 	// Parse allowed tenant IDs
 	if tenants := os.Getenv("OBOT_ENTRA_ALLOWED_TENANTS"); tenants != "" {
-		validator.allowedTenants = strings.Split(tenants, ",")
-		for i := range validator.allowedTenants {
-			validator.allowedTenants[i] = strings.TrimSpace(validator.allowedTenants[i])
-		}
+		validator.allowedTenants = splitAndTrim(tenants)
 	}
 
 	// Parse allowed email domains
 	if domains := os.Getenv("OBOT_ENTRA_ALLOWED_DOMAINS"); domains != "" {
-		validator.allowedDomains = strings.Split(domains, ",")
-		for i := range validator.allowedDomains {
-			validator.allowedDomains[i] = strings.TrimSpace(validator.allowedDomains[i])
-		}
+		validator.allowedDomains = splitAndTrim(domains)
+	}
+
+	if validator.tenantID == "" && !allowAnyTenant {
+		return nil, fmt.Errorf("OBOT_ENTRA_TENANT_ID must be configured, or set OBOT_ENTRA_ALLOW_ANY_TENANT=true")
+	}
+	if validator.tenantID == "common" && len(validator.allowedTenants) == 0 && len(validator.allowedDomains) == 0 && !allowAnyTenant {
+		return nil, fmt.Errorf("OBOT_ENTRA_ALLOWED_TENANTS or OBOT_ENTRA_ALLOWED_DOMAINS must be configured for common tenant, or set OBOT_ENTRA_ALLOW_ANY_TENANT=true")
+	}
+	if validator.tenantID == "" {
+		validator.tenantID = "common"
 	}
 
 	return validator, nil
@@ -107,9 +109,13 @@ func (v *EntraIdPValidator) Validate(ctx context.Context, tokenString string) (*
 		return nil, fmt.Errorf("failed to extract claims: %w", err)
 	}
 
+	tid, _ := claims["tid"].(string)
+	if v.tenantID != "" && v.tenantID != "common" && tid != v.tenantID {
+		return nil, fmt.Errorf("tenant does not match configured tenant")
+	}
+
 	// Validate tenant if restrictions are configured
 	if len(v.allowedTenants) > 0 {
-		tid, _ := claims["tid"].(string)
 		if tid == "" {
 			return nil, fmt.Errorf("missing tenant ID claim")
 		}

@@ -141,6 +141,105 @@ func TestExternalIdPConfigClientAuthorization(t *testing.T) {
 	}
 }
 
+func TestExternalIdPConfigDefaultsFailClosed(t *testing.T) {
+	config := NewExternalIdPConfig()
+	if config.AutoProvision {
+		t.Fatal("expected external IdP auto-provisioning to default to disabled")
+	}
+	if config.IsClientAllowed("default:client") {
+		t.Fatal("expected external IdP exchange to deny all clients without an allowlist")
+	}
+}
+
+func TestGoogleIdPValidatorRequiresDomainPolicy(t *testing.T) {
+	t.Setenv("OBOT_GOOGLE_CLIENT_ID", "google-client")
+	if _, err := NewGoogleIdPValidator(); err == nil {
+		t.Fatal("expected Google validator to require a domain policy")
+	}
+
+	t.Setenv("OBOT_GOOGLE_ALLOWED_DOMAINS", "example.com")
+	if _, err := NewGoogleIdPValidator(); err != nil {
+		t.Fatalf("expected Google validator with allowed domain, got %v", err)
+	}
+}
+
+func TestGoogleIdPValidatorAllowsExplicitDomainOverride(t *testing.T) {
+	t.Setenv("OBOT_GOOGLE_CLIENT_ID", "google-client")
+	t.Setenv("OBOT_GOOGLE_ALLOW_ALL_DOMAINS", "true")
+
+	if _, err := NewGoogleIdPValidator(); err != nil {
+		t.Fatalf("expected Google validator with explicit allow-all override, got %v", err)
+	}
+}
+
+func TestOIDCIdPValidatorRequiresDomainPolicy(t *testing.T) {
+	t.Setenv("OBOT_OIDC_ISSUER", "https://id.example.com")
+	t.Setenv("OBOT_OIDC_CLIENT_ID", "oidc-client")
+	if _, err := NewOIDCIdPValidator(); err == nil {
+		t.Fatal("expected OIDC validator to require a domain policy")
+	}
+
+	t.Setenv("OBOT_OIDC_ALLOWED_DOMAINS", "example.com")
+	if _, err := NewOIDCIdPValidator(); err != nil {
+		t.Fatalf("expected OIDC validator with allowed domain, got %v", err)
+	}
+}
+
+func TestOIDCIdPValidatorAllowsExplicitDomainOverride(t *testing.T) {
+	t.Setenv("OBOT_OIDC_ISSUER", "https://id.example.com")
+	t.Setenv("OBOT_OIDC_CLIENT_ID", "oidc-client")
+	t.Setenv("OBOT_OIDC_ALLOW_ALL_DOMAINS", "true")
+
+	if _, err := NewOIDCIdPValidator(); err != nil {
+		t.Fatalf("expected OIDC validator with explicit allow-all override, got %v", err)
+	}
+}
+
+func TestEntraIdPValidatorRequiresTenantPolicy(t *testing.T) {
+	t.Setenv("OBOT_ENTRA_CLIENT_ID", "entra-client")
+	if _, err := NewEntraIdPValidator(); err == nil {
+		t.Fatal("expected Entra validator to require a tenant policy")
+	}
+
+	t.Setenv("OBOT_ENTRA_TENANT_ID", "tenant-id")
+	if _, err := NewEntraIdPValidator(); err != nil {
+		t.Fatalf("expected Entra validator with tenant ID, got %v", err)
+	}
+}
+
+func TestEntraIdPValidatorAllowsExplicitTenantOverride(t *testing.T) {
+	t.Setenv("OBOT_ENTRA_CLIENT_ID", "entra-client")
+	t.Setenv("OBOT_ENTRA_ALLOW_ANY_TENANT", "true")
+
+	if _, err := NewEntraIdPValidator(); err != nil {
+		t.Fatalf("expected Entra validator with explicit allow-any override, got %v", err)
+	}
+}
+
+func TestExternalTokenExchangeAudience(t *testing.T) {
+	h := &handler{baseURL: "https://obot.example.com"}
+	mcpID, audience, err := h.externalTokenExchangeAudience("https://obot.example.com/mcp-connect/server1/sse")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mcpID != "server1" {
+		t.Fatalf("expected mcpID server1, got %q", mcpID)
+	}
+	if audience != "https://obot.example.com/mcp-connect/server1" {
+		t.Fatalf("unexpected audience %q", audience)
+	}
+
+	for _, resource := range []string{
+		"https://other.example.com/mcp-connect/server1",
+		"https://obot.example.com/api/projects",
+		"/mcp-connect/server1",
+	} {
+		if _, _, err := h.externalTokenExchangeAudience(resource); err == nil {
+			t.Fatalf("expected %q to be rejected", resource)
+		}
+	}
+}
+
 // TestExternalIdPRegistryIssuerRouting tests the registry's issuer-based routing.
 func TestExternalIdPRegistryIssuerRouting(t *testing.T) {
 	registry := &ExternalIdPRegistry{
@@ -161,10 +260,10 @@ func TestExternalIdPRegistryIssuerRouting(t *testing.T) {
 	registry.Register(entraValidator)
 
 	tests := []struct {
-		name           string
-		issuer         string
-		wantProvider   string
-		wantFound      bool
+		name         string
+		issuer       string
+		wantProvider string
+		wantFound    bool
 	}{
 		{
 			name:         "routes to Google for exact match",
