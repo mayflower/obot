@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gptscript-ai/gptscript/pkg/engine"
 	gtypes "github.com/gptscript-ai/gptscript/pkg/types"
+	"github.com/obot-platform/obot/pkg/jwt/persistent"
 )
 
 // Run is responsible for calling MCP tools when the LLM requests their execution. This method is called by GPTScript.
@@ -56,7 +57,8 @@ func (sm *SessionManager) Run(ctx engine.Context, _ chan<- gtypes.CompletionStat
 			// "email":      server.UserEmail,
 			// "picture":    server.Picture,
 			// "UserGroups": strings.Join(server.UserGroups, ","),
-			"MCPID": serverConfig.MCPServerName,
+			"MCPID":     serverConfig.MCPServerName,
+			"TokenType": string(persistent.TokenTypeMCPProxy),
 		})
 		if err != nil {
 			log.Errorf("failed to create token: %v", err)

@@ -37,18 +37,16 @@ func NewGoogleIdPValidator() (*GoogleIdPValidator, error) {
 
 	// Parse allowed email domains
 	if domains := os.Getenv("OBOT_GOOGLE_ALLOWED_DOMAINS"); domains != "" {
-		validator.allowedDomains = strings.Split(domains, ",")
-		for i := range validator.allowedDomains {
-			validator.allowedDomains[i] = strings.TrimSpace(validator.allowedDomains[i])
-		}
+		validator.allowedDomains = splitAndTrim(domains)
 	}
 
 	// Parse allowed Google Workspace hosted domains
 	if hds := os.Getenv("OBOT_GOOGLE_ALLOWED_HDS"); hds != "" {
-		validator.allowedHDs = strings.Split(hds, ",")
-		for i := range validator.allowedHDs {
-			validator.allowedHDs[i] = strings.TrimSpace(validator.allowedHDs[i])
-		}
+		validator.allowedHDs = splitAndTrim(hds)
+	}
+
+	if len(validator.allowedDomains) == 0 && len(validator.allowedHDs) == 0 && !envBool("OBOT_GOOGLE_ALLOW_ALL_DOMAINS") {
+		return nil, fmt.Errorf("OBOT_GOOGLE_ALLOWED_DOMAINS or OBOT_GOOGLE_ALLOWED_HDS must be configured, or set OBOT_GOOGLE_ALLOW_ALL_DOMAINS=true")
 	}
 
 	return validator, nil

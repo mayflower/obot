@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/logger"
 	"github.com/obot-platform/obot/pkg/api"
@@ -225,6 +224,7 @@ func (h *handler) doAuthorizationCode(req api.Context, oauthClient v1.OAuthClien
 		AuthProviderNamespace: oauthAuthRequest.Spec.AuthProviderNamespace,
 		AuthProviderUserID:    oauthAuthRequest.Spec.AuthProviderUserID,
 		MCPID:                 oauthAuthRequest.Spec.MCPID,
+		TokenType:             persistent.TokenTypeOAuthAccess,
 	}
 	tkn, err := h.tokenService.NewToken(req.Context(), tknCtx)
 	if err != nil {
@@ -321,6 +321,7 @@ func (h *handler) doRefreshToken(req api.Context, oauthClient v1.OAuthClient, re
 		AuthProviderNamespace: oauthToken.Spec.AuthProviderNamespace,
 		AuthProviderUserID:    oauthToken.Spec.AuthProviderUserID,
 		MCPID:                 oauthToken.Spec.MCPID,
+		TokenType:             persistent.TokenTypeOAuthAccess,
 	}
 	tkn, err := h.tokenService.NewToken(req.Context(), tknCtx)
 	if err != nil {
@@ -366,13 +367,7 @@ func (h *handler) doTokenExchange(req api.Context, oauthClient v1.OAuthClient, r
 		})
 	}
 
-	// Handle external IdP token exchange (e.g., Google ID tokens)
-	// This allows external applications to exchange their IdP tokens for Obot access tokens
-	if subjectTokenType == tokenTypeIDToken {
-		return h.doExternalIdPTokenExchange(req, oauthClient, subjectToken)
-	}
-
-	if subjectTokenType != tokenTypeJWT && subjectTokenType != tokenTypeAPIKey {
+	if subjectTokenType != tokenTypeJWT && subjectTokenType != tokenTypeAPIKey && subjectTokenType != tokenTypeIDToken {
 		return types.NewErrBadRequest("%v", Error{
 			Code:        ErrInvalidRequest,
 			Description: "subject_token_type must be urn:ietf:params:oauth:token-type:jwt, urn:obot:token-type:api-key, or urn:ietf:params:oauth:token-type:id_token",
@@ -392,6 +387,12 @@ func (h *handler) doTokenExchange(req api.Context, oauthClient v1.OAuthClient, r
 			Code:        ErrInvalidRequest,
 			Description: "resource is required",
 		})
+	}
+
+	// Handle external IdP token exchange (e.g., Google ID tokens)
+	// This allows external applications to exchange their IdP tokens for Obot access tokens.
+	if subjectTokenType == tokenTypeIDToken {
+		return h.doExternalIdPTokenExchange(req, oauthClient, resource, subjectToken)
 	}
 
 	var (
@@ -598,6 +599,7 @@ func (h *handler) doTokenExchange(req api.Context, oauthClient v1.OAuthClient, r
 			UserID:     userID,
 			UserGroups: userGroups,
 			Namespace:  system.DefaultNamespace,
+			TokenType:  persistent.TokenTypeGatewayAPI,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to generate token: %w", err)
@@ -668,6 +670,7 @@ func (h *handler) getTokenForConnectResource(ctx context.Context, subjectTokenTy
 	// For JWTs, update the existing token context and create a new token.
 	tokenCtx.MCPID = resourceMCPID
 	tokenCtx.Audience = fmt.Sprintf("%s/mcp-connect/%s", h.baseURL, audienceID)
+	tokenCtx.TokenType = persistent.TokenTypeOAuthAccess
 
 	token, err := h.tokenService.NewToken(ctx, *tokenCtx)
 	if err != nil {
@@ -717,7 +720,7 @@ func validateAPIKeyAccess(ctx api.Context, apiKey *gwtypes.APIKey, mcpID string)
 // 3. Create/find the user and identity in Obot (upsert, if auto-provisioning enabled)
 // 4. Create an Obot auth token
 // 5. Return the token in RFC 8693 format
-func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAuthClient, subjectToken string) error {
+func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAuthClient, resource, subjectToken string) error {
 	// Step 1: Verify the OAuth client is authorized for external IdP token exchange
 	clientID := fmt.Sprintf("%s:%s", oauthClient.Namespace, oauthClient.Name)
 	if !h.externalIdPConf.IsClientAllowed(clientID) {
@@ -725,6 +728,14 @@ func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAu
 		return types.NewErrBadRequest("%v", Error{
 			Code:        ErrUnauthorizedClient,
 			Description: "client is not authorized for external IdP token exchange",
+		})
+	}
+
+	mcpID, audience, err := h.externalTokenExchangeAudience(resource)
+	if err != nil {
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrInvalidRequest,
+			Description: err.Error(),
 		})
 	}
 
@@ -788,21 +799,21 @@ func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAu
 	now := time.Now()
 	expiresAt := now.Add(time.Hour) // 1 hour TTL for security
 
-	jwtClaims := jwt.MapClaims{
-		"sub":                   fmt.Sprintf("%d", user.ID),
-		"aud":                   h.baseURL,
-		"exp":                   float64(expiresAt.Unix()),
-		"iat":                   float64(now.Unix()),
-		"email":                 claims.Email,
-		"name":                  user.Username,
-		"picture":               claims.Picture,
-		"UserGroups":            strings.Join(user.Role.Groups(), ","),
-		"AuthProviderNamespace": validator.AuthProviderNamespace(),
-		"AuthProviderName":      validator.AuthProviderName(),
-		"AuthProviderUserID":    claims.Subject,
-	}
-
-	_, publicToken, err := h.tokenService.NewTokenWithClaims(req.Context(), jwtClaims)
+	publicToken, err := h.tokenService.NewToken(req.Context(), persistent.TokenContext{
+		Audience:              audience,
+		IssuedAt:              now,
+		ExpiresAt:             expiresAt,
+		UserID:                fmt.Sprintf("%d", user.ID),
+		UserName:              user.Username,
+		UserEmail:             user.Email,
+		Picture:               claims.Picture,
+		UserGroups:            user.Role.Groups(),
+		AuthProviderName:      validator.AuthProviderName(),
+		AuthProviderNamespace: validator.AuthProviderNamespace(),
+		AuthProviderUserID:    claims.Subject,
+		MCPID:                 mcpID,
+		TokenType:             persistent.TokenTypeOAuthAccess,
+	})
 	if err != nil {
 		log.Errorf("Failed to create JWT for %s: %v", claims.Email, err)
 		return types.NewErrBadRequest("%v", Error{
@@ -814,11 +825,41 @@ func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAu
 	log.Infof("External IdP token exchange: created JWT for user %d via %s, expires at %v", user.ID, providerName, expiresAt)
 
 	// Step 5: Return RFC 8693 compliant response
-	// Note: issued_token_type is now JWT since we return an actual JWT
 	return req.Write(TokenExchangeResponse{
 		AccessToken:     publicToken,
-		IssuedTokenType: tokenTypeJWT,
+		IssuedTokenType: tokenTypeAccessToken,
 		TokenType:       "Bearer",
 		ExpiresIn:       int(time.Until(expiresAt).Seconds()),
 	})
+}
+
+func (h *handler) externalTokenExchangeAudience(resource string) (string, string, error) {
+	resourceURL, err := url.Parse(resource)
+	if err != nil || !resourceURL.IsAbs() {
+		return "", "", fmt.Errorf("resource must be an absolute URL")
+	}
+	if !sameOrigin(resourceURL, h.baseURL) {
+		return "", "", fmt.Errorf("resource must target this Obot server")
+	}
+
+	path := strings.Trim(resourceURL.EscapedPath(), "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] != "mcp-connect" || parts[1] == "" {
+		return "", "", fmt.Errorf("resource must target /mcp-connect/{mcp_id}")
+	}
+
+	mcpID, err := url.PathUnescape(parts[1])
+	if err != nil || mcpID == "" || strings.Contains(mcpID, "/") {
+		return "", "", fmt.Errorf("resource has an invalid MCP server ID")
+	}
+
+	return mcpID, fmt.Sprintf("%s/mcp-connect/%s", strings.TrimRight(h.baseURL, "/"), url.PathEscape(mcpID)), nil
+}
+
+func sameOrigin(resourceURL *url.URL, rawBaseURL string) bool {
+	baseURL, err := url.Parse(rawBaseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(resourceURL.Scheme, baseURL.Scheme) && strings.EqualFold(resourceURL.Host, baseURL.Host)
 }

@@ -11,6 +11,7 @@ import (
 	gtypes "github.com/gptscript-ai/gptscript/pkg/types"
 	nmcp "github.com/nanobot-ai/nanobot/pkg/mcp"
 	"github.com/obot-platform/obot/apiclient/types"
+	"github.com/obot-platform/obot/pkg/jwt/persistent"
 )
 
 type Client struct {
@@ -117,11 +118,12 @@ func (sm *SessionManager) loadSession(ctx context.Context, server ServerConfig, 
 		now := time.Now().Add(-time.Second)
 		// TODO(thedadams): This needs to be fixed before user information headers can be passed to the MCP server.
 		jwtToken, token, err = sm.tokenService.NewTokenWithClaims(ctx, jwt.MapClaims{
-			"aud":   gtypes.FirstSet(server.Audiences...),
-			"exp":   float64(now.Add(time.Hour + 15*time.Minute).Unix()),
-			"iat":   float64(now.Unix()),
-			"sub":   server.UserID,
-			"MCPID": server.MCPServerName,
+			"aud":       gtypes.FirstSet(server.Audiences...),
+			"exp":       float64(now.Add(time.Hour + 15*time.Minute).Unix()),
+			"iat":       float64(now.Unix()),
+			"sub":       server.UserID,
+			"MCPID":     server.MCPServerName,
+			"TokenType": string(persistent.TokenTypeMCPProxy),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create JWT token for client: %w", err)

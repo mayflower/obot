@@ -13,11 +13,11 @@ import (
 // OIDCIdPValidator validates tokens from any standard OIDC-compliant provider
 // (Dex, Keycloak, Auth0, Okta, etc.). It implements the ExternalIdPValidator interface.
 type OIDCIdPValidator struct {
-	issuer         string
+	issuer           string
 	allowedAudiences []string
-	providerName   string
-	authProvider   string
-	allowedDomains []string
+	providerName     string
+	authProvider     string
+	allowedDomains   []string
 
 	mu       sync.Mutex
 	verifier *oidc.IDTokenVerifier
@@ -64,6 +64,9 @@ func NewOIDCIdPValidator() (*OIDCIdPValidator, error) {
 
 	if domains := os.Getenv("OBOT_OIDC_ALLOWED_DOMAINS"); domains != "" {
 		validator.allowedDomains = splitAndTrim(domains)
+	}
+	if len(validator.allowedDomains) == 0 && !envBool("OBOT_OIDC_ALLOW_ALL_DOMAINS") {
+		return nil, fmt.Errorf("OBOT_OIDC_ALLOWED_DOMAINS must be configured, or set OBOT_OIDC_ALLOW_ALL_DOMAINS=true")
 	}
 
 	return validator, nil
@@ -187,7 +190,7 @@ func (v *OIDCIdPValidator) Validate(ctx context.Context, tokenString string) (*E
 	}, nil
 }
 
-func (v *OIDCIdPValidator) ProviderName() string         { return v.providerName }
+func (v *OIDCIdPValidator) ProviderName() string          { return v.providerName }
 func (v *OIDCIdPValidator) AuthProviderName() string      { return v.authProvider }
 func (v *OIDCIdPValidator) AuthProviderNamespace() string { return "default" }
 

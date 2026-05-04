@@ -43,7 +43,9 @@ func (g *gatewayTokenReview) AuthenticateRequest(req *http.Request) (*authentica
 	// Try JWT validation first (for RFC 8693 exchanged tokens)
 	// This provides stateless authentication via JWKS without database lookups.
 	if g.tokenService != nil {
-		if tokenCtx, err := g.tokenService.DecodeToken(req.Context(), bearer); err == nil {
+		if tokenCtx, err := g.tokenService.DecodeToken(req.Context(), bearer); err == nil &&
+			tokenCtx.TokenType == persistent.TokenTypeGatewayAPI &&
+			g.tokenService.ValidForRequest(tokenCtx, req) {
 			// JWT validation succeeded - extract user info from claims
 			namespace := tokenCtx.AuthProviderNamespace
 			name := tokenCtx.AuthProviderName
