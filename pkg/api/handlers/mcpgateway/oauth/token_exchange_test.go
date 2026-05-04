@@ -218,7 +218,18 @@ func TestEntraIdPValidatorAllowsExplicitTenantOverride(t *testing.T) {
 
 func TestExternalTokenExchangeAudience(t *testing.T) {
 	h := &handler{baseURL: "https://obot.example.com"}
-	mcpID, audience, err := h.externalTokenExchangeAudience("https://obot.example.com/mcp-connect/server1/sse")
+	mcpID, audience, err := h.externalTokenExchangeAudience("https://obot.example.com/mcp-connect")
+	if err != nil {
+		t.Fatalf("unexpected gateway-scoped resource error: %v", err)
+	}
+	if mcpID != "" {
+		t.Fatalf("expected empty mcpID for gateway-scoped resource, got %q", mcpID)
+	}
+	if audience != "https://obot.example.com/mcp-connect" {
+		t.Fatalf("unexpected gateway-scoped audience %q", audience)
+	}
+
+	mcpID, audience, err = h.externalTokenExchangeAudience("https://obot.example.com/mcp-connect/server1/sse")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

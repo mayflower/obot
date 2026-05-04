@@ -2,7 +2,7 @@
 
 ## Summary
 
-This branch adds an RFC 8693 token exchange path that lets an external client application exchange a validated external Identity Provider ID token for an Obot-issued bearer token that can call a specific MCP Gateway resource.
+This branch adds an RFC 8693 token exchange path that lets an external client application exchange a validated external Identity Provider ID token for an Obot-issued bearer token that can call the MCP Gateway.
 
 The primary use case is service-to-Obot MCP access without an interactive Obot browser login:
 
@@ -11,8 +11,8 @@ The primary use case is service-to-Obot MCP access without an interactive Obot b
 3. The client POSTs that ID token to Obot's OAuth token endpoint using the RFC 8693 token exchange grant.
 4. Obot validates the external token with the matching provider validator.
 5. Obot maps or provisions the external identity into its gateway identity store.
-6. Obot returns an Obot-signed access token scoped to a single `/mcp-connect/{mcp_id}` resource.
-7. The client uses that access token as `Authorization: Bearer ...` when connecting to the MCP Gateway resource.
+6. Obot returns an Obot-signed access token scoped to `/mcp-connect` or, when requested, a single `/mcp-connect/{mcp_id}` resource.
+7. The client uses that access token as `Authorization: Bearer ...` when connecting to MCP Gateway resources.
 
 The returned token is a JWT signed by Obot's persistent token service, but it is intentionally returned as an OAuth access token:
 
@@ -25,7 +25,7 @@ The returned token is a JWT signed by Obot's persistent token service, but it is
 }
 ```
 
-It is not a general Obot API login token. It is bound to the requested MCP resource.
+It is not a general Obot API login token. It is bound to the MCP Gateway path and cannot be replayed against normal Obot API routes.
 
 ## Platform Context
 
@@ -78,12 +78,12 @@ After validation, Obot creates an internal `TokenContext` with:
 | `sub` / `UserID` | Obot gateway user ID |
 | `email`, `name`, `picture` | User profile fields from the mapped Obot user and external claims |
 | `AuthProviderNamespace`, `AuthProviderName`, `AuthProviderUserID` | External identity mapping fields |
-| `MCPID` | MCP server ID parsed from the requested resource |
-| `aud` | Canonical Obot MCP resource URL, `{configured Obot base URL}/mcp-connect/{mcp_id}` |
+| `MCPID` | MCP server ID parsed from a single-server resource, or empty for gateway-scoped `/mcp-connect` resources |
+| `aud` | Canonical Obot MCP resource URL, either `{configured Obot base URL}/mcp-connect` or `{configured Obot base URL}/mcp-connect/{mcp_id}` |
 | `TokenType` | `oauth_access` |
 | `exp` | One hour after issuance |
 
-The token service enforces token purpose and audience before accepting tokens. `oauth_access` tokens are valid only for same-origin `/mcp-connect/{mcp_id}` requests matching their audience path. They are rejected for normal Obot API routes such as `/api/...`.
+The token service enforces token purpose and audience before accepting tokens. `oauth_access` tokens are valid only for same-origin `/mcp-connect` requests matching their audience path. A token scoped to `/mcp-connect` can call any MCP server behind the gateway, while a token scoped to `/mcp-connect/{mcp_id}` can call only that server and its subpaths. Both forms are rejected for normal Obot API routes such as `/api/...`.
 
 ## Where It Is Implemented
 
@@ -113,7 +113,7 @@ This document focuses on the external IdP `id_token` flow.
 
 ## Where It Is Used
 
-The returned access token is used against the MCP Gateway:
+The returned access token is used against the MCP Gateway. With the recommended gateway-scoped audience, the same token can be used for any MCP server path behind the same Obot gateway:
 
 ```http
 GET /mcp-connect/{mcp_id} HTTP/1.1
@@ -121,7 +121,7 @@ Host: obot.example.com
 Authorization: Bearer <obot_access_token>
 ```
 
-or for subpaths under that same resource:
+and for transport subpaths:
 
 ```http
 GET /mcp-connect/{mcp_id}/sse HTTP/1.1
@@ -133,6 +133,9 @@ The resource binding is path based:
 
 | Token audience | Request path | Accepted |
 |---|---|---|
+| `https://obot.example.com/mcp-connect` | `/mcp-connect/server1` | Yes |
+| `https://obot.example.com/mcp-connect` | `/mcp-connect/server2/sse` | Yes |
+| `https://obot.example.com/mcp-connect` | `/api/projects` | No |
 | `https://obot.example.com/mcp-connect/server1` | `/mcp-connect/server1` | Yes |
 | `https://obot.example.com/mcp-connect/server1` | `/mcp-connect/server1/sse` | Yes |
 | `https://obot.example.com/mcp-connect/server1` | `/mcp-connect/server2` | No |
@@ -297,7 +300,7 @@ POST /oauth/token
 POST /oauth/token/{mcp_id}
 ```
 
-The external IdP exchange uses the `resource` parameter to determine the target MCP resource. The `{mcp_id}` path parameter is not enough for the external IdP exchange path.
+The external IdP exchange uses the `resource` parameter to determine the target MCP Gateway audience. The `{mcp_id}` path parameter is not enough for the external IdP exchange path.
 
 ## Client Application Flow
 
@@ -315,17 +318,35 @@ Important constraints:
 
 Do not send an external provider access token as `subject_token`. This flow expects a JWT ID token.
 
-### 2. Choose the MCP Resource
+### 2. Choose the MCP Gateway Audience
 
-The client must know the MCP resource it wants to access:
+The client chooses the MCP Gateway audience it wants to access.
+
+For a flexible MCP client that discovers or connects to many servers behind the gateway, use the gateway-scoped resource:
+
+```text
+https://obot.example.com/mcp-connect
+```
+
+For a client that should be limited to one MCP server, use the single-server resource:
 
 ```text
 https://obot.example.com/mcp-connect/{mcp_id}
 ```
 
-The value must be an absolute URL, must target the same origin as Obot's configured base URL, and must start with `/mcp-connect/`.
+The value must be an absolute URL, must target the same origin as Obot's configured base URL, and must be `/mcp-connect` or start with `/mcp-connect/`.
 
-Subpaths are allowed in the request, but Obot canonicalizes the token audience to the first MCP path segment:
+The gateway-scoped form is the normal choice for clients that use Obot as a flexible MCP gateway. It avoids forcing a client to perform one token exchange per MCP server during first-load or cache warmup. Obot still prevents API replay because this token is accepted only under `/mcp-connect`.
+
+For gateway-scoped tokens, Obot keeps the token audience at `/mcp-connect`:
+
+```text
+resource=https://obot.example.com/mcp-connect
+audience=https://obot.example.com/mcp-connect
+MCPID=
+```
+
+For single-server tokens, subpaths are allowed in the request, but Obot canonicalizes the token audience to the first MCP path segment:
 
 ```text
 resource=https://obot.example.com/mcp-connect/server1/sse
@@ -346,7 +367,7 @@ curl -sS https://obot.example.com/oauth/token \
   --data-urlencode 'subject_token=EXTERNAL_ID_TOKEN' \
   --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
   --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
-  --data-urlencode 'resource=https://obot.example.com/mcp-connect/server1'
+  --data-urlencode 'resource=https://obot.example.com/mcp-connect'
 ```
 
 Example with HTTP Basic client authentication:
@@ -361,7 +382,7 @@ curl -sS https://obot.example.com/oauth/token \
   --data-urlencode 'subject_token=EXTERNAL_ID_TOKEN' \
   --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
   --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
-  --data-urlencode 'resource=https://obot.example.com/mcp-connect/server1'
+  --data-urlencode 'resource=https://obot.example.com/mcp-connect'
 ```
 
 `requested_token_type` is optional only when omitted. If present, it must be:
@@ -374,7 +395,7 @@ urn:ietf:params:oauth:token-type:access_token
 
 ### 4. Use the Returned Access Token
 
-Use the returned `access_token` as a bearer token to connect to the requested MCP Gateway resource:
+Use the returned `access_token` as a bearer token to connect to MCP Gateway resources:
 
 ```bash
 curl -sS https://obot.example.com/mcp-connect/server1 \
@@ -383,7 +404,19 @@ curl -sS https://obot.example.com/mcp-connect/server1 \
 
 For an MCP client using SSE or streamable HTTP, configure the transport URL as the MCP Gateway URL and attach the returned bearer token in the `Authorization` header.
 
-The token is valid for the canonical MCP resource and its subpaths until expiry. Refresh by performing token exchange again with a fresh valid external IdP ID token.
+The token is valid for the canonical MCP Gateway resource and its subpaths until expiry. A gateway-scoped `/mcp-connect` token can be reused across MCP servers behind the same Obot gateway; a single-server `/mcp-connect/{mcp_id}` token is valid only for that server. Refresh by performing token exchange again with a fresh valid external IdP ID token.
+
+### 5. Cache Tokens by Audience
+
+Clients should cache exchanged tokens by user and audience until shortly before expiry.
+
+For the normal gateway-scoped flow, that means one cached token per user and Obot gateway:
+
+```text
+cache key = user identity + https://obot.example.com/mcp-connect
+```
+
+Do not create one token per MCP server unless the client intentionally asked for a single-server audience. A client that loads tools from many MCP servers should exchange once for `/mcp-connect`, then reuse that bearer token for each MCP Gateway connection.
 
 ## End-to-End Example: External Service to Obot MCP
 
@@ -400,7 +433,7 @@ An external service such as `maistack-langserve` can use the flow like this:
    subject_token=<external ID token>
    subject_token_type=urn:ietf:params:oauth:token-type:id_token
    requested_token_type=urn:ietf:params:oauth:token-type:access_token
-   resource=https://obot.data.example.com/mcp-connect/{mcp_id}
+   resource=https://obot.data.example.com/mcp-connect
 
 5. Obot validates the external token, maps or provisions the user, and returns an Obot access token.
 6. The external service uses that token to call:
@@ -445,7 +478,7 @@ The implementation is intentionally scoped:
 |---|---|
 | OAuth client allowlist | Only `OBOT_EXTERNAL_IDP_ALLOWED_CLIENTS` may use external IdP exchange. |
 | Provider allowlists | Google/OIDC require domain policy unless explicitly overridden. Entra requires tenant policy unless explicitly overridden. |
-| Token audience | External exchange tokens are bound to `{configured Obot base URL}/mcp-connect/{mcp_id}`. |
+| Token audience | External exchange tokens are bound to `{configured Obot base URL}/mcp-connect` or `{configured Obot base URL}/mcp-connect/{mcp_id}`. |
 | Token purpose | External exchange tokens are `TokenType=oauth_access`. |
 | API replay prevention | `oauth_access` tokens are rejected for non-MCP paths such as `/api/...`. |
 | MCP proxy replay prevention | Internal downstream proxy tokens are `TokenType=mcp_proxy` and are rejected by Obot API auth. |
@@ -464,7 +497,7 @@ Common failures:
 | Unsupported `subject_token_type` | `invalid_request` |
 | `requested_token_type` present but not `access_token` | `invalid_request` |
 | `resource` missing | `invalid_request` |
-| `resource` not absolute, wrong origin, or not `/mcp-connect/{mcp_id}` | `invalid_request` |
+| `resource` not absolute, wrong origin, or not `/mcp-connect` or `/mcp-connect/{mcp_id}` | `invalid_request` |
 | OAuth client not listed in `OBOT_EXTERNAL_IDP_ALLOWED_CLIENTS` | `unauthorized_client` |
 | External token issuer unsupported | `invalid_grant` |
 | External token signature/audience/expiry/domain/tenant validation fails | `invalid_grant` |
@@ -479,13 +512,13 @@ For the Obot operator:
 3. Configure exactly the IdP validators needed by the deployment.
 4. Configure domain or tenant restrictions, or make an explicit allow-all decision with the override flags.
 5. Decide whether `OBOT_EXTERNAL_IDP_AUTO_PROVISION` should remain false or be explicitly enabled.
-6. Share the Obot token endpoint, OAuth client credentials, and target MCP Gateway resource URLs with the client application.
+6. Share the Obot token endpoint, OAuth client credentials, and target MCP Gateway resource URL with the client application.
 
 For the client application:
 
 1. Authenticate the user with the external IdP.
 2. Obtain an ID token, not an access token.
 3. POST an RFC 8693 token exchange request to `https://obot.example.com/oauth/token`.
-4. Include `resource=https://obot.example.com/mcp-connect/{mcp_id}`.
+4. Include `resource=https://obot.example.com/mcp-connect`, or `resource=https://obot.example.com/mcp-connect/{mcp_id}` when intentionally limiting the token to one server.
 5. Store the returned Obot access token only for its short lifetime.
-6. Use it only as a bearer token for the requested MCP Gateway resource and subpaths.
+6. Use it only as a bearer token for MCP Gateway resources and subpaths.
