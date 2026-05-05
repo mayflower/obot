@@ -843,12 +843,16 @@ func (h *handler) externalTokenExchangeAudience(resource string) (string, string
 	}
 
 	path := strings.Trim(resourceURL.EscapedPath(), "/")
+	if path == "" || path == "v0.1" || path == "v0.1/servers" {
+		return "", strings.TrimRight(h.baseURL, "/"), nil
+	}
+
 	parts := strings.Split(path, "/")
 	if len(parts) == 1 && parts[0] == "mcp-connect" {
 		return "", fmt.Sprintf("%s/mcp-connect", strings.TrimRight(h.baseURL, "/")), nil
 	}
 	if len(parts) < 2 || parts[0] != "mcp-connect" || parts[1] == "" {
-		return "", "", fmt.Errorf("resource must target /mcp-connect or /mcp-connect/{mcp_id}")
+		return "", "", fmt.Errorf("resource must target the registry API, /mcp-connect, or /mcp-connect/{mcp_id}")
 	}
 
 	mcpID, err := url.PathUnescape(parts[1])

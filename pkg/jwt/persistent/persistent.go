@@ -259,12 +259,16 @@ func (t *TokenService) ValidForRequest(tokenContext *TokenContext, req *http.Req
 	case TokenTypeMCPProxy:
 		return false
 	case TokenTypeOAuthAccess, "":
-		return t.audienceAllowsMCPConnectRequest(tokenContext.Audience, req)
+		return t.audienceAllowsOAuthAccessRequest(tokenContext.Audience, req)
 	case TokenTypeGatewayAPI, TokenTypeRun, TokenTypeWorkflow:
 		return sameURLOrigin(tokenContext.Audience, t.serverURL)
 	default:
 		return false
 	}
+}
+
+func (t *TokenService) audienceAllowsOAuthAccessRequest(audience string, req *http.Request) bool {
+	return t.audienceAllowsMCPConnectRequest(audience, req) || t.audienceAllowsRegistryRequest(audience, req)
 }
 
 func (t *TokenService) audienceAllowsMCPConnectRequest(audience string, req *http.Request) bool {
@@ -293,6 +297,38 @@ func (t *TokenService) audienceAllowsMCPConnectRequest(audience string, req *htt
 		requestPath = "/"
 	}
 	return requestPath == audiencePath || strings.HasPrefix(requestPath, strings.TrimRight(audiencePath, "/")+"/")
+}
+
+func (t *TokenService) audienceAllowsRegistryRequest(audience string, req *http.Request) bool {
+	if audience == "" || req == nil || req.URL == nil {
+		return false
+	}
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		return false
+	}
+
+	audienceURL, err := url.Parse(audience)
+	if err != nil {
+		return false
+	}
+	if !sameURLOrigin(audience, t.serverURL) {
+		return false
+	}
+
+	audiencePath := strings.TrimRight(audienceURL.EscapedPath(), "/")
+	switch audiencePath {
+	case "", "/":
+		requestPath := req.URL.EscapedPath()
+		return requestPath == "/v0.1" || strings.HasPrefix(requestPath, "/v0.1/")
+	case "/v0.1":
+		requestPath := req.URL.EscapedPath()
+		return requestPath == "/v0.1" || strings.HasPrefix(requestPath, "/v0.1/")
+	case "/v0.1/servers":
+		requestPath := req.URL.EscapedPath()
+		return requestPath == "/v0.1/servers" || strings.HasPrefix(requestPath, "/v0.1/servers/")
+	default:
+		return false
+	}
 }
 
 func sameURLOrigin(a, b string) bool {

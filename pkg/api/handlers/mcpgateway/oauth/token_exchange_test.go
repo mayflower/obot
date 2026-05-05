@@ -218,6 +218,23 @@ func TestEntraIdPValidatorAllowsExplicitTenantOverride(t *testing.T) {
 
 func TestExternalTokenExchangeAudience(t *testing.T) {
 	h := &handler{baseURL: "https://obot.example.com"}
+	for _, resource := range []string{
+		"https://obot.example.com",
+		"https://obot.example.com/v0.1",
+		"https://obot.example.com/v0.1/servers",
+	} {
+		mcpID, audience, err := h.externalTokenExchangeAudience(resource)
+		if err != nil {
+			t.Fatalf("unexpected registry resource error for %q: %v", resource, err)
+		}
+		if mcpID != "" {
+			t.Fatalf("expected empty mcpID for registry resource %q, got %q", resource, mcpID)
+		}
+		if audience != "https://obot.example.com" {
+			t.Fatalf("unexpected registry audience for %q: %q", resource, audience)
+		}
+	}
+
 	mcpID, audience, err := h.externalTokenExchangeAudience("https://obot.example.com/mcp-connect")
 	if err != nil {
 		t.Fatalf("unexpected gateway-scoped resource error: %v", err)
@@ -243,6 +260,7 @@ func TestExternalTokenExchangeAudience(t *testing.T) {
 	for _, resource := range []string{
 		"https://other.example.com/mcp-connect/server1",
 		"https://obot.example.com/api/projects",
+		"https://obot.example.com/v0.1/publish",
 		"/mcp-connect/server1",
 	} {
 		if _, _, err := h.externalTokenExchangeAudience(resource); err == nil {

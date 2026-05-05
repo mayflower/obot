@@ -34,6 +34,10 @@ Administrators and Power Users+ control which servers are visible to which users
 
 Obot implements the [MCP Registry specification](https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/api/generic-registry-api.md), enabling MCP clients to programmatically discover available servers.
 
+The registry API is exposed under `/v0.1`. Its primary discovery endpoint is `/v0.1/servers`, with version details available under `/v0.1/servers/{serverName}/versions`.
+
+When registry authentication is disabled, the registry returns the servers granted to all users. When `OBOT_SERVER_ENABLE_REGISTRY_AUTH=true`, the registry returns the servers visible to the authenticated user. External applications that already authenticate users with an IdP can use Obot's RFC 8693 token exchange to exchange the user's external ID token for a registry-scoped bearer token. That token is valid only for read-only Registry API requests and is separate from the MCP Gateway token used for `/mcp-connect`.
+
 ## Learn More
 
 - [MCP Registries](/functionality/mcp-registries/) - Managing registries, API details, and contributing servers
