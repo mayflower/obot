@@ -55,7 +55,7 @@ The registry is exposed at `/v0.1/servers` and supports:
 
 **No-Auth Mode (Default)**: Returns servers that have been granted access to all users via MCP Registries. Ideal for public instances.
 
-**Auth Mode**: Returns all servers the authenticated user has access to. Enable with `OBOT_SERVER_ENABLE_REGISTRY_AUTH=true`.
+**Auth Mode**: Returns all servers the authenticated user has access to. Enable with `OBOT_SERVER_ENABLE_REGISTRY_AUTH=true`. Registry clients authenticate with a bearer token for the registry protected resource advertised at `/.well-known/oauth-protected-resource/v0.1/servers`. For external applications that already authenticate users with an IdP, Obot's RFC 8693 token exchange can exchange the user's external ID token for a registry-scoped access token. Use that token for read-only Registry API discovery under `/v0.1`, and use a separate MCP Gateway token for `/mcp-connect`.
 
 ### Server Naming
 
