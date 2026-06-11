@@ -155,6 +155,11 @@ type TokenContext struct {
 
 	MCPID string
 
+	// TokenType scopes the token to a specific issuance flow. Validators reject
+	// tokens whose declared type doesn't match the request context (e.g. MCP
+	// proxy tokens cannot be exchanged for arbitrary gateway access).
+	TokenType TokenType
+
 	// The following fields are for runs
 	Namespace     string
 	ModelProvider string
@@ -373,6 +378,7 @@ func (t *TokenService) DecodeToken(ctx context.Context, token string) (*TokenCon
 		AuthProviderNamespace: getStringClaim("AuthProviderNamespace"),
 		AuthProviderUserID:    getStringClaim("AuthProviderUserID"),
 		MCPID:                 getStringClaim("MCPID"),
+		TokenType:             TokenType(getStringClaim("TokenType")),
 		Namespace:             getStringClaim("Namespace"),
 		ModelProvider:         getStringClaim("ModelProvider"),
 		Model:                 getStringClaim("Model"),
@@ -404,6 +410,7 @@ func (t *TokenService) NewToken(ctx context.Context, context TokenContext) (stri
 		"AuthProviderNamespace": context.AuthProviderNamespace,
 		"AuthProviderUserID":    context.AuthProviderUserID,
 		"MCPID":                 context.MCPID,
+		"TokenType":             string(context.TokenType),
 		"Namespace":             context.Namespace,
 		"ModelProvider":         context.ModelProvider,
 		"Model":                 context.Model,

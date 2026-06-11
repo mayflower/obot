@@ -25,6 +25,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.94.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10
 	github.com/containerd/errdefs v1.0.0
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/docker/go-connections v0.6.0
 	github.com/fatih/color v1.18.0
 	github.com/glebarez/sqlite v1.11.0
@@ -34,6 +35,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/jsonschema-go v0.4.2
 	github.com/google/uuid v1.6.0
+	github.com/gptscript-ai/gptscript v0.9.9
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/keygen-sh/keygen-go/v3 v3.3.0
 	github.com/moby/moby/api v1.52.0-alpha.1
@@ -57,7 +59,7 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/zalando/go-keyring v0.2.8
 	go.opentelemetry.io/contrib/exporters/autoexport v0.68.0
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/log v0.19.0
 	go.opentelemetry.io/otel/sdk v1.43.0
@@ -163,7 +165,7 @@ require (
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-gorp/gorp/v3 v3.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
