@@ -115,23 +115,24 @@ func (c *Client) triggerMCPOAuthTokenChange(ctx context.Context, mcpID string) e
 
 // Pending state methods
 
-func (c *Client) CreateMCPOAuthPendingState(ctx context.Context, userID, mcpID, mcpURL, oauthAuthRequestID, state, verifier string, oauthConf *oauth2.Config) error {
+func (c *Client) CreateMCPOAuthPendingState(ctx context.Context, userID, mcpID, mcpURL, oauthAuthRequestID, completionRedirectURL, state, verifier string, oauthConf *oauth2.Config) error {
 	hashedState := fmt.Sprintf("%x", sha256.Sum256([]byte(state)))
 	ps := &types.MCPOAuthPendingState{
-		HashedState:        hashedState,
-		State:              state,
-		Verifier:           verifier,
-		UserID:             userID,
-		MCPID:              mcpID,
-		URL:                mcpURL,
-		OAuthAuthRequestID: oauthAuthRequestID,
-		ClientID:           oauthConf.ClientID,
-		ClientSecret:       oauthConf.ClientSecret,
-		AuthURL:            oauthConf.Endpoint.AuthURL,
-		TokenURL:           oauthConf.Endpoint.TokenURL,
-		AuthStyle:          oauthConf.Endpoint.AuthStyle,
-		RedirectURL:        oauthConf.RedirectURL,
-		Scopes:             strings.Join(oauthConf.Scopes, " "),
+		HashedState:           hashedState,
+		State:                 state,
+		Verifier:              verifier,
+		UserID:                userID,
+		MCPID:                 mcpID,
+		URL:                   mcpURL,
+		OAuthAuthRequestID:    oauthAuthRequestID,
+		CompletionRedirectURL: completionRedirectURL,
+		ClientID:              oauthConf.ClientID,
+		ClientSecret:          oauthConf.ClientSecret,
+		AuthURL:               oauthConf.Endpoint.AuthURL,
+		TokenURL:              oauthConf.Endpoint.TokenURL,
+		AuthStyle:             oauthConf.Endpoint.AuthStyle,
+		RedirectURL:           oauthConf.RedirectURL,
+		Scopes:                strings.Join(oauthConf.Scopes, " "),
 	}
 
 	if err := c.encryptMCPOAuthPendingState(ctx, ps); err != nil {

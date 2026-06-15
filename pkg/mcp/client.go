@@ -113,6 +113,7 @@ func (sm *SessionManager) loadSession(ctx context.Context, server ServerConfig, 
 			UserID:     server.UserID,
 			MCPID:      server.MCPServerName,
 			UserGroups: []string{types.GroupMCP, types.GroupAuthenticated},
+			TokenType:  persistent.TokenTypeMCPProxy,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create JWT token for client: %w", err)

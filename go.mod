@@ -24,6 +24,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10
 	github.com/containerd/errdefs v1.0.0
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/docker/go-connections v0.6.0
 	github.com/fatih/color v1.19.0
 	github.com/glebarez/sqlite v1.11.0

@@ -17,6 +17,7 @@ import (
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/storage/value"
@@ -67,6 +68,42 @@ func (c *Client) UserHasIdentityForAuthProvider(ctx context.Context, userID uint
 // EnsureIdentity ensures that the given identity exists in the database, and returns the user associated with it.
 func (c *Client) EnsureIdentity(ctx context.Context, id *types.Identity, timezone string) (*types.User, error) {
 	return c.EnsureIdentityWithRole(ctx, id, timezone, c.emailsWithExplicitRoles[strings.ToLower(id.Email)])
+}
+
+// GetUserByExternalIdentity retrieves a user by their external identity (auth provider and provider user ID).
+// Returns an error if the identity or user is not found.
+func (c *Client) GetUserByExternalIdentity(ctx context.Context, authProviderNamespace, authProviderName, providerUserID string) (*types.User, error) {
+	hashedProviderUserID := hash.String(providerUserID)
+
+	var identity types.Identity
+	err := c.db.WithContext(ctx).
+		Where("auth_provider_namespace = ? AND auth_provider_name = ? AND hashed_provider_user_id = ?",
+			authProviderNamespace, authProviderName, hashedProviderUserID).
+		First(&identity).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("identity not found for provider %s/%s", authProviderNamespace, authProviderName)
+		}
+		return nil, fmt.Errorf("failed to find identity: %w", err)
+	}
+
+	if identity.UserID == 0 {
+		return nil, fmt.Errorf("identity has no associated user")
+	}
+
+	var user types.User
+	if err := c.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", identity.UserID).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("user not found for identity")
+		}
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+
+	if err := c.decryptUser(ctx, &user); err != nil {
+		return nil, fmt.Errorf("failed to decrypt user: %w", err)
+	}
+
+	return &user, nil
 }
 
 // EnsureIdentityWithRole ensures the given identity exists in the database with the at least the given role, and returns the user associated with it.
@@ -225,30 +262,64 @@ func (c *Client) ensureIdentity(ctx context.Context, tx *gorm.DB, id *types.Iden
 		// We check for both true and null values, because the email might have been verified before we started tracking verified emails.
 		userQuery = userQuery.Where("hashed_email = ? and (verified_email = true or verified_email is null)", user.HashedEmail)
 		checkForExistingUser = true
+	} else if user.HashedEmail != "" {
+		// For unverified providers (e.g., external IdP token exchange via RFC 8693),
+		// still check for an existing user with this email to avoid duplicate key errors
+		// when the user already has an identity from a verified provider like Google.
+		userQuery = userQuery.Where("hashed_email = ?", user.HashedEmail)
+		checkForExistingUser = true
 	}
 
 	if checkForExistingUser {
 		// Copy the user so that we don't have to decrypt unless the user already exists.
 		u := *user
-		if err := userQuery.First(&u).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		lookupErr := userQuery.First(&u).Error
+		if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
 			// Clear user ID so that it can be auto-generated.
 			u.ID = 0
-			created = true
-			if err = c.encryptUser(ctx, &u); err != nil {
+			if err := c.encryptUser(ctx, &u); err != nil {
 				return nil, false, fmt.Errorf("failed to encrypt user: %w", err)
 			}
-			if err = tx.Create(&u).Error; err != nil {
-				return nil, false, err
+
+			// Avoid a check-then-create race by tolerating concurrent inserts.
+			createResult := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&u)
+			if createResult.Error != nil {
+				return nil, false, createResult.Error
 			}
 
-			// Copy the auto-generated values back to the user object.
-			user.ID = u.ID
-			user.CreatedAt = u.CreatedAt
-			user.Role = u.Role
-		} else if err != nil {
-			return nil, false, err
-		} else {
-			if err = c.decryptUser(ctx, &u); err != nil {
+			if createResult.RowsAffected > 0 {
+				created = true
+				// Copy the auto-generated values back to the user object.
+				user.ID = u.ID
+				user.CreatedAt = u.CreatedAt
+				user.Role = u.Role
+			} else {
+				reloadErr := userQuery.First(&u).Error
+				if errors.Is(reloadErr, gorm.ErrRecordNotFound) {
+					fallbackQuery := tx.Where("deleted_at IS NULL")
+					switch {
+					case user.ID != 0:
+						fallbackQuery = fallbackQuery.Where("id = ?", user.ID)
+					case user.HashedEmail != "" && user.HashedUsername != "":
+						fallbackQuery = fallbackQuery.Where("(hashed_email = ? OR hashed_username = ?)", user.HashedEmail, user.HashedUsername)
+					case user.HashedEmail != "":
+						fallbackQuery = fallbackQuery.Where("hashed_email = ?", user.HashedEmail)
+					default:
+						fallbackQuery = fallbackQuery.Where("hashed_username = ?", user.HashedUsername)
+					}
+					if err := fallbackQuery.First(&u).Error; err != nil {
+						return nil, false, err
+					}
+				} else if reloadErr != nil {
+					return nil, false, reloadErr
+				}
+			}
+		} else if lookupErr != nil {
+			return nil, false, lookupErr
+		}
+
+		if !created {
+			if err := c.decryptUser(ctx, &u); err != nil {
 				return nil, false, fmt.Errorf("failed to decrypt user: %w", err)
 			}
 
@@ -306,7 +377,7 @@ func (c *Client) ensureIdentity(ctx context.Context, tx *gorm.DB, id *types.Iden
 				if err := c.encryptUser(ctx, &u); err != nil {
 					return nil, false, fmt.Errorf("failed to encrypt user: %w", err)
 				}
-				if err = tx.Updates(u).Error; err != nil {
+				if err := tx.Updates(u).Error; err != nil {
 					return nil, false, err
 				}
 			}

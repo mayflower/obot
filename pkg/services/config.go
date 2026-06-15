@@ -124,6 +124,7 @@ type Config struct {
 	MCPNetworkPolicyProviderChartPath    string `usage:"Local filesystem path to the network policy provider chart"`
 	MCPNetworkPolicyProviderValues       string `usage:"YAML or JSON values blob merged into the network policy provider chart values"`
 	MCPDefaultDenyAllEgress              bool   `usage:"Default new MCP servers to deny all egress when network policy enforcement is enabled" default:"false"`
+	MCPOAuthReturnURLAllowlist           []string `usage:"Allowed absolute URL prefixes for MCP OAuth return_url redirects" env:"OBOT_MCP_OAUTH_RETURN_URL_ALLOWLIST"`
 
 	// Published artifact storage
 	ArtifactStorageProvider       string `usage:"Storage provider for published artifacts (s3, gcs, azure, custom)" name:"artifact-storage-provider" env:"OBOT_ARTIFACT_STORAGE_PROVIDER"`
@@ -165,6 +166,7 @@ type Services struct {
 
 	// Global token storage client for MCP OAuth
 	MCPOAuthTokenStorage         mcp.GlobalTokenStore
+	MCPOAuthReturnURLAllowlist   []string
 	MCPSecretBindingAllowedLabel string
 	RegistryNoAuth               bool
 
@@ -830,7 +832,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		return nil, err
 	}
 
-	authenticators := gserver.NewGatewayTokenReviewer(gatewayClient, providerDispatcher)
+	authenticators := gserver.NewGatewayTokenReviewer(gatewayClient, providerDispatcher, persistentTokenServer)
 	if config.EnableAuthentication {
 		proxyManager = proxy.NewProxyManager(providerDispatcher)
 
@@ -957,6 +959,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		MCPSessionManager:            mcpSessionManager,
 		OAuthServerConfig:            oauthServerConfig,
 		MCPOAuthTokenStorage:         mcpOAuthTokenStorage,
+		MCPOAuthReturnURLAllowlist:   config.MCPOAuthReturnURLAllowlist,
 		MCPSecretBindingAllowedLabel: secretBindingAllowedLabel,
 		RegistryNoAuth:               registryNoAuth,
 		DSN:                          config.DSN,

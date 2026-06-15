@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/rand"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -11,10 +12,14 @@ import (
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	"golang.org/x/crypto/bcrypt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// clientIDPattern validates custom client IDs: lowercase alphanumeric with hyphens
+var clientIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$`)
 
 type OAuthClientsHandler struct {
 	oauthServerConfig OAuthAuthorizationServerConfig
@@ -63,15 +68,51 @@ func (h *OAuthClientsHandler) Get(req api.Context) error {
 }
 
 // Create handles the POST /api/oauth-clients endpoint.
+// If client_id is provided in the manifest, it will be used as the resource name
+// (with the "oc1" prefix). If a client with that ID already exists, the existing
+// client is returned (idempotent creation). If client_id is omitted, a random
+// ID is generated.
 func (h *OAuthClientsHandler) Create(req api.Context) error {
 	var input types.OAuthClientManifest
 	if err := req.Read(&input); err != nil {
 		return types.NewErrBadRequest("failed to read request body: %v", err)
 	}
 
+	// Determine the resource name
+	var resourceName string
+	if input.ClientID != "" {
+		// Validate custom client ID format
+		customID := strings.ToLower(input.ClientID)
+		if len(customID) > 63 {
+			return types.NewErrBadRequest("client_id must be at most 63 characters")
+		}
+		if !clientIDPattern.MatchString(customID) {
+			return types.NewErrBadRequest("client_id must be lowercase alphanumeric with hyphens (e.g., 'my-app')")
+		}
+		resourceName = system.OAuthClientPrefix + customID
+
+		// Check if client already exists (idempotent creation)
+		var existing v1.OAuthClient
+		err := req.Storage.Get(req.Context(), kclient.ObjectKey{
+			Namespace: req.Namespace(),
+			Name:      resourceName,
+		}, &existing)
+		if err == nil {
+			// Client exists, return it (no secret since we don't store it)
+			return req.Write(ConvertClient(existing, h.serverURL, ""))
+		}
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		// Client doesn't exist, proceed with creation
+	} else {
+		// Generate random name (backwards compatible)
+		resourceName = system.OAuthClientPrefix + strings.ToLower(rand.Text())
+	}
+
 	client := v1.OAuthClient{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      system.OAuthClientPrefix + strings.ToLower(rand.Text()),
+			Name:      resourceName,
 			Namespace: req.Namespace(),
 		},
 		Spec: v1.OAuthClientSpec{
@@ -85,7 +126,11 @@ func (h *OAuthClientsHandler) Create(req api.Context) error {
 		return types.NewErrBadRequest("%v", err)
 	}
 
-	clientSecret := rand.Text() + rand.Text()
+	// Use provided client_secret if specified, otherwise generate a random one
+	clientSecret := input.ClientSecret
+	if clientSecret == "" {
+		clientSecret = rand.Text() + rand.Text()
+	}
 	client.Spec.ClientSecretHash, err = bcrypt.GenerateFromPassword([]byte(clientSecret), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("failed to generate client secret hash: %v", err)

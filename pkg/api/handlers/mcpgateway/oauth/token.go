@@ -34,11 +34,11 @@ import (
 var log = logger.Package()
 
 const (
-	tokenExpiration      = 10 * time.Minute
-	tokenTypeJWT         = "urn:ietf:params:oauth:token-type:jwt"
-	tokenTypeAccessToken = "urn:ietf:params:oauth:token-type:access_token"
-	tokenTypeAPIKey      = "urn:obot:token-type:api-key"
-
+	tokenExpiration         = 10 * time.Minute
+	tokenTypeJWT            = "urn:ietf:params:oauth:token-type:jwt"
+	tokenTypeAccessToken    = "urn:ietf:params:oauth:token-type:access_token"
+	tokenTypeAPIKey         = "urn:obot:token-type:api-key"
+	tokenTypeIDToken        = "urn:ietf:params:oauth:token-type:id_token"
 	ErrUnsupportedGrantType = ErrorCode("unsupported_grant_type")
 )
 
@@ -243,6 +243,7 @@ func (h *handler) doAuthorizationCode(req api.Context, oauthClient v1.OAuthClien
 		AuthProviderNamespace: oauthAuthRequest.Spec.AuthProviderNamespace,
 		AuthProviderUserID:    oauthAuthRequest.Spec.AuthProviderUserID,
 		MCPID:                 oauthAuthRequest.Spec.MCPID,
+		TokenType:             persistent.TokenTypeOAuthAccess,
 	}
 	_, tkn, err := h.tokenService.NewToken(req.Context(), tknCtx)
 	if err != nil {
@@ -348,6 +349,7 @@ func (h *handler) doRefreshToken(req api.Context, oauthClient v1.OAuthClient, re
 		AuthProviderNamespace: oauthToken.Spec.AuthProviderNamespace,
 		AuthProviderUserID:    oauthToken.Spec.AuthProviderUserID,
 		MCPID:                 oauthToken.Spec.MCPID,
+		TokenType:             persistent.TokenTypeOAuthAccess,
 	}
 	_, tkn, err := h.tokenService.NewToken(req.Context(), tknCtx)
 	if err != nil {
@@ -394,10 +396,10 @@ func (h *handler) doTokenExchange(req api.Context, oauthClient v1.OAuthClient, r
 		})
 	}
 
-	if subjectTokenType != tokenTypeJWT && subjectTokenType != tokenTypeAPIKey {
+	if subjectTokenType != tokenTypeJWT && subjectTokenType != tokenTypeAPIKey && subjectTokenType != tokenTypeIDToken {
 		return types.NewErrBadRequest("%v", Error{
 			Code:        ErrInvalidRequest,
-			Description: "subject_token_type must be urn:ietf:params:oauth:token-type:jwt or urn:obot:token-type:api-key",
+			Description: "subject_token_type must be urn:ietf:params:oauth:token-type:jwt, urn:obot:token-type:api-key, or urn:ietf:params:oauth:token-type:id_token",
 		})
 	}
 
@@ -414,6 +416,12 @@ func (h *handler) doTokenExchange(req api.Context, oauthClient v1.OAuthClient, r
 			Code:        ErrInvalidRequest,
 			Description: "resource is required",
 		})
+	}
+
+	// Handle external IdP token exchange (e.g., Google ID tokens)
+	// This allows external applications to exchange their IdP tokens for Obot access tokens.
+	if subjectTokenType == tokenTypeIDToken {
+		return h.doExternalIdPTokenExchange(req, oauthClient, resource, subjectToken)
 	}
 
 	var (
@@ -648,6 +656,7 @@ func (h *handler) doTokenExchange(req api.Context, oauthClient v1.OAuthClient, r
 			UserID:     userID,
 			UserGroups: []string{types.GroupAPI, types.GroupAuthenticated},
 			Namespace:  system.DefaultNamespace,
+			TokenType:  persistent.TokenTypeGatewayAPI,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to generate token: %w", err)
@@ -736,6 +745,7 @@ func (h *handler) getTokenForMCPConnectResource(ctx context.Context, subjectToke
 	// For JWTs, update the existing token context and create a new token.
 	tokenCtx.MCPID = resourceMCPID
 	tokenCtx.Audience = fmt.Sprintf("%s/%s/%s", h.baseURL, connectString, audienceID)
+	tokenCtx.TokenType = persistent.TokenTypeOAuthAccess
 
 	_, token, err := h.tokenService.NewToken(ctx, *tokenCtx)
 	if err != nil {
@@ -767,4 +777,171 @@ func validateAPIKeyAccess(ctx api.Context, apiKey *gwtypes.APIKey, mcpID string)
 	}
 
 	return fmt.Errorf("API key does not have access to MCP server %s", mcpID)
+}
+
+// doExternalIdPTokenExchange handles token exchange for external Identity Providers.
+// This allows external applications to exchange their IdP tokens for Obot access tokens
+// without requiring users to log in to Obot separately.
+//
+// Supported providers are determined by the registered validators in the IdP registry.
+// Currently supported: Google (more providers can be added by implementing ExternalIdPValidator).
+//
+// Security: Only OAuth clients explicitly listed in OBOT_EXTERNAL_IDP_ALLOWED_CLIENTS
+// are permitted to use this flow.
+//
+// Flow:
+// 1. Verify the OAuth client is authorized for external IdP token exchange
+// 2. Validate the external IdP token using registered validators
+// 3. Create/find the user and identity in Obot (upsert, if auto-provisioning enabled)
+// 4. Create an Obot auth token
+// 5. Return the token in RFC 8693 format
+func (h *handler) doExternalIdPTokenExchange(req api.Context, oauthClient v1.OAuthClient, resource, subjectToken string) error {
+	// Step 1: Verify the OAuth client is authorized for external IdP token exchange
+	clientID := fmt.Sprintf("%s:%s", oauthClient.Namespace, oauthClient.Name)
+	if !h.externalIdPConf.IsClientAllowed(clientID) {
+		log.Warnf("External IdP token exchange: client %s not authorized", clientID)
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrUnauthorizedClient,
+			Description: "client is not authorized for external IdP token exchange",
+		})
+	}
+
+	mcpID, audience, err := h.externalTokenExchangeAudience(resource)
+	if err != nil {
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrInvalidRequest,
+			Description: err.Error(),
+		})
+	}
+
+	// Step 2: Validate the external IdP token using the registry
+	claims, validator, err := h.idpRegistry.ValidateToken(req.Context(), subjectToken)
+	if err != nil {
+		log.Warnf("External IdP token validation failed: %v", err)
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrInvalidGrant,
+			Description: "subject token validation failed",
+		})
+	}
+
+	providerName := validator.ProviderName()
+	log.Infof("External IdP token exchange: validated %s token for %s (sub: %s) via client %s",
+		providerName, claims.Email, claims.Subject, clientID)
+
+	// Step 3: Ensure identity exists (creates user if auto-provisioning enabled)
+	identity := &gwtypes.Identity{
+		AuthProviderName:      validator.AuthProviderName(),
+		AuthProviderNamespace: validator.AuthProviderNamespace(),
+		ProviderUserID:        claims.Subject,
+		ProviderUsername:      claims.Email,
+		Email:                 claims.Email,
+		IconURL:               claims.Picture,
+	}
+
+	var user *gwtypes.User
+	if h.externalIdPConf.AutoProvision {
+		// Auto-provisioning enabled: create user if needed
+		user, err = req.GatewayClient.EnsureIdentity(req.Context(), identity, "")
+		if err != nil {
+			log.Errorf("Failed to ensure identity for %s: %v", claims.Email, err)
+			return types.NewErrBadRequest("%v", Error{
+				Code:        ErrServerError,
+				Description: "identity provisioning failed",
+			})
+		}
+	} else {
+		// Auto-provisioning disabled: only allow existing users
+		user, err = req.GatewayClient.GetUserByExternalIdentity(
+			req.Context(),
+			validator.AuthProviderNamespace(),
+			validator.AuthProviderName(),
+			claims.Subject,
+		)
+		if err != nil {
+			log.Warnf("External IdP token exchange: user not found for %s (auto-provision disabled)", claims.Email)
+			return types.NewErrBadRequest("%v", Error{
+				Code:        ErrAccessDenied,
+				Description: "user not registered, contact administrator",
+			})
+		}
+	}
+
+	log.Infof("External IdP token exchange: authenticated user %d (%s) via %s", user.ID, claims.Email, providerName)
+
+	// Step 4: Create an Obot JWT directly (no database token)
+	// This simplifies the token flow - clients receive a JWT that can be validated
+	// via JWKS without database lookups.
+	now := time.Now()
+	expiresAt := now.Add(time.Hour) // 1 hour TTL for security
+
+	_, publicToken, err := h.tokenService.NewToken(req.Context(), persistent.TokenContext{
+		Audience:              audience,
+		IssuedAt:              persistent.NewTime(now),
+		ExpiresAt:             persistent.NewTime(expiresAt),
+		UserID:                fmt.Sprintf("%d", user.ID),
+		UserName:              user.Username,
+		UserEmail:             user.Email,
+		Picture:               claims.Picture,
+		UserGroups:            user.Role.Groups(),
+		AuthProviderName:      validator.AuthProviderName(),
+		AuthProviderNamespace: validator.AuthProviderNamespace(),
+		AuthProviderUserID:    claims.Subject,
+		MCPID:                 mcpID,
+		TokenType:             persistent.TokenTypeOAuthAccess,
+	})
+	if err != nil {
+		log.Errorf("Failed to create JWT for %s: %v", claims.Email, err)
+		return types.NewErrBadRequest("%v", Error{
+			Code:        ErrServerError,
+			Description: "token generation failed",
+		})
+	}
+
+	log.Infof("External IdP token exchange: created JWT for user %d via %s, expires at %v", user.ID, providerName, expiresAt)
+
+	// Step 5: Return RFC 8693 compliant response
+	return req.Write(TokenExchangeResponse{
+		AccessToken:     publicToken,
+		IssuedTokenType: tokenTypeAccessToken,
+		TokenType:       "Bearer",
+		ExpiresIn:       int(time.Until(expiresAt).Seconds()),
+	})
+}
+
+func (h *handler) externalTokenExchangeAudience(resource string) (string, string, error) {
+	resourceURL, err := url.Parse(resource)
+	if err != nil || !resourceURL.IsAbs() {
+		return "", "", fmt.Errorf("resource must be an absolute URL")
+	}
+	if !sameOrigin(resourceURL, h.baseURL) {
+		return "", "", fmt.Errorf("resource must target this Obot server")
+	}
+
+	path := strings.Trim(resourceURL.EscapedPath(), "/")
+	if path == "" || path == "v0.1" || path == "v0.1/servers" {
+		return "", strings.TrimRight(h.baseURL, "/"), nil
+	}
+
+	parts := strings.Split(path, "/")
+	if len(parts) == 1 && parts[0] == "mcp-connect" {
+		return "", fmt.Sprintf("%s/mcp-connect", strings.TrimRight(h.baseURL, "/")), nil
+	}
+	if len(parts) < 2 || parts[0] != "mcp-connect" || parts[1] == "" {
+		return "", "", fmt.Errorf("resource must target the registry API, /mcp-connect, or /mcp-connect/{mcp_id}")
+	}
+
+	mcpID, err := url.PathUnescape(parts[1])
+	if err != nil || mcpID == "" || strings.Contains(mcpID, "/") {
+		return "", "", fmt.Errorf("resource has an invalid MCP server ID")
+	}
+
+	return mcpID, fmt.Sprintf("%s/mcp-connect/%s", strings.TrimRight(h.baseURL, "/"), url.PathEscape(mcpID)), nil
+}
+
+func sameOrigin(resourceURL *url.URL, rawBaseURL string) bool {
+	baseURL, err := url.Parse(rawBaseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(resourceURL.Scheme, baseURL.Scheme) && strings.EqualFold(resourceURL.Host, baseURL.Host)
 }

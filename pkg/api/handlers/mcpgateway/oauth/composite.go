@@ -19,9 +19,18 @@ type pendingComponentAuth struct {
 // If it is not complete, it returns the list of component OAuth URLs still needed (respecting session-scoped skips).
 func (h *handler) checkCompositeAuth(req api.Context) error {
 	var (
-		compositeMCPID     = req.PathValue("mcp_id")
-		oauthAuthRequestID = req.URL.Query().Get("oauth_auth_request")
+		compositeMCPID        = req.PathValue("mcp_id")
+		oauthAuthRequestID    = req.URL.Query().Get("oauth_auth_request")
+		completionRedirectURL string
 	)
+	if oauthAuthRequestID == "" {
+		var err error
+		completionRedirectURL, err = h.oauthChecker.ValidateCompletionRedirectURL(req.URL.Query().Get("return_url"))
+		if err != nil {
+			return err
+		}
+	}
+
 	var compositeServer v1.MCPServer
 	if err := req.Get(&compositeServer, compositeMCPID); err != nil {
 		return fmt.Errorf("failed to get composite server: %w", err)
@@ -68,7 +77,7 @@ func (h *handler) checkCompositeAuth(req api.Context) error {
 			return fmt.Errorf("failed to get server config: %w", err)
 		}
 
-		authURL, err := h.oauthChecker.CheckForMCPAuth(req, componentServer, serverConfig, userID, componentServer.Name, oauthAuthRequestID)
+		authURL, err := h.oauthChecker.CheckForMCPAuth(req, componentServer, serverConfig, userID, componentServer.Name, oauthAuthRequestID, completionRedirectURL)
 		if err != nil || authURL == "" {
 			continue
 		}
@@ -93,6 +102,13 @@ func (h *handler) checkCompositeAuth(req api.Context) error {
 		log.Infof("Composite OAuth completed; returning completion URI to finish authorization: compositeMCPID=%s authRequest=%s", compositeMCPID, authRequest.Name)
 		return req.Write(map[string]string{
 			"redirect_uri": redirectURL,
+		})
+	}
+
+	if completionRedirectURL != "" {
+		log.Infof("Composite OAuth check completed and returning UI completion redirect: compositeMCPID=%s", compositeMCPID)
+		return req.Write(map[string]string{
+			"redirect_uri": completionRedirectURL,
 		})
 	}
 

@@ -78,7 +78,18 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 		return nil, err
 	}
 
-	oauthChecker := oauth.NewMCPOAuthHandlerFactory(services.ServerURL, services.MCPSessionManager, services.StorageClient, services.GatewayClient, services.MCPOAuthTokenStorage, services.MCPSecretBindingAllowedLabel)
+	oauthChecker, err := oauth.NewMCPOAuthHandlerFactory(
+		services.ServerURL,
+		services.MCPSessionManager,
+		services.StorageClient,
+		services.GatewayClient,
+		services.MCPOAuthTokenStorage,
+		services.MCPSecretBindingAllowedLabel,
+		services.MCPOAuthReturnURLAllowlist,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	models := handlers.NewModelHandler(services.ModelAccessPolicyHelper)
 	mcpCatalogs := handlers.NewMCPCatalogHandler(services.DefaultMCPCatalogPath, services.ServerURL, services.MCPRuntimeBackend, services.MCPSessionManager, oauthChecker, services.GatewayClient, services.AccessControlRuleHelper, services.MCPSecretBindingAllowedLabel)
@@ -620,7 +631,7 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	// Well-known
 	wellknown.SetupHandlers(services.ServerURL, services.OAuthServerConfig, services.RegistryNoAuth, mux)
 	// Obot OAuth
-	oauth.SetupHandlers(oauthChecker, services.MCPOAuthTokenStorage, services.PersistentTokenServer, services.OAuthServerConfig, services.MCPSessionManager, services.AccessControlRuleHelper, services.ServerURL, services.MCPOAuthClientSecretExpiration, mux)
+	oauth.SetupHandlers(oauthChecker, services.MCPOAuthTokenStorage, services.PersistentTokenServer, services.OAuthServerConfig, services.MCPSessionManager, services.AccessControlRuleHelper, services.ServerURL, services.MCPOAuthClientSecretExpiration, services.GatewayServer.AuthCompleteURL(), mux)
 
 	mux.HTTPHandle("/", ui.Handler(services.DevUIPort, services.UserUIPort))
 

@@ -43,7 +43,8 @@ const (
 
 // MCPOAuthChecker will check the OAuth status for an MCP server. This interface breaks an import cycle.
 type MCPOAuthChecker interface {
-	CheckForMCPAuth(req api.Context, server v1.MCPServer, config mcp.ServerConfig, userID, mcpID, oauthAppAuthRequestID string) (string, error)
+	CheckForMCPAuth(req api.Context, server v1.MCPServer, config mcp.ServerConfig, userID, mcpID, oauthAppAuthRequestID, completionRedirectURL string) (string, error)
+	ValidateCompletionRedirectURL(raw string) (string, error)
 }
 
 type MCPHandler struct {
@@ -684,6 +685,10 @@ func (m *MCPHandler) CheckOAuth(req api.Context) error {
 func (m *MCPHandler) GetOAuthURL(req api.Context) error {
 	catalogID := req.PathValue("catalog_id")
 	workspaceID := req.PathValue("workspace_id")
+	completionRedirectURL, err := m.mcpOAuthChecker.ValidateCompletionRedirectURL(req.URL.Query().Get("return_url"))
+	if err != nil {
+		return err
+	}
 
 	server, serverConfig, err := m.mcpSessionManager.ServerForAction(req.Context(), req.PathValue("mcp_server_id"), req.User.GetUID())
 	if err != nil {
@@ -697,7 +702,7 @@ func (m *MCPHandler) GetOAuthURL(req api.Context) error {
 		return types.NewErrNotFound("MCP server not found")
 	}
 
-	u, err := m.mcpOAuthChecker.CheckForMCPAuth(req, server, serverConfig, req.User.GetUID(), server.Name, "")
+	u, err := m.mcpOAuthChecker.CheckForMCPAuth(req, server, serverConfig, req.User.GetUID(), server.Name, "", completionRedirectURL)
 	if err != nil {
 		return fmt.Errorf("failed to get OAuth URL: %w", err)
 	}

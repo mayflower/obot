@@ -86,6 +86,7 @@ func (m *MCPHandler) RegisterOAuthDebuggerClient(req api.Context) error {
 		server.Name,
 		serverConfig.URL,
 		OAuthDebuggerPendingStateMarker,
+		"", // completionRedirectURL — unused by the OAuth debugger
 		state,
 		oauth2.GenerateVerifier(),
 		conf,

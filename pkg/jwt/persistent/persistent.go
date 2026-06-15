@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,6 +44,16 @@ func NewTokenService(serverURL string, gatewayClient *client.Client) (*TokenServ
 	}
 	return t, nil
 }
+
+type TokenType string
+
+const (
+	TokenTypeRun         TokenType = "run"
+	TokenTypeWorkflow    TokenType = "workflow"
+	TokenTypeOAuthAccess TokenType = "oauth_access"
+	TokenTypeGatewayAPI  TokenType = "gateway_api"
+	TokenTypeMCPProxy    TokenType = "mcp_proxy"
+)
 
 // EnsureJWK ensures that the JWK is created and stored. It should only be called in a controller post-start hook which only allows one to be run at a time.
 func (t *TokenService) EnsureJWK(ctx context.Context) error {
@@ -143,7 +154,8 @@ type TokenContext struct {
 	AuthProviderNamespace string
 	AuthProviderUserID    string
 
-	MCPID string
+	MCPID     string
+	TokenType TokenType
 
 	// The following fields are for runs
 	Namespace     string
@@ -194,6 +206,9 @@ func (t *TokenService) AuthenticateRequest(req *http.Request) (*authenticator.Re
 
 	tokenContext, err := t.DecodeToken(req.Context(), token)
 	if err != nil {
+		return nil, false, nil
+	}
+	if !t.ValidForRequest(tokenContext, req) {
 		return nil, false, nil
 	}
 
@@ -252,6 +267,99 @@ func (t *TokenService) AuthenticateRequest(req *http.Request) (*authenticator.Re
 			Extra:  extra,
 		},
 	}, true, nil
+}
+
+func (t *TokenService) ValidForRequest(tokenContext *TokenContext, req *http.Request) bool {
+	if tokenContext == nil {
+		return false
+	}
+
+	switch tokenContext.TokenType {
+	case TokenTypeMCPProxy:
+		return false
+	case TokenTypeOAuthAccess, "":
+		return t.audienceAllowsOAuthAccessRequest(tokenContext.Audience, req)
+	case TokenTypeGatewayAPI, TokenTypeRun, TokenTypeWorkflow:
+		return sameURLOrigin(tokenContext.Audience, t.serverURL)
+	default:
+		return false
+	}
+}
+
+func (t *TokenService) audienceAllowsOAuthAccessRequest(audience string, req *http.Request) bool {
+	return t.audienceAllowsMCPConnectRequest(audience, req) || t.audienceAllowsRegistryRequest(audience, req)
+}
+
+func (t *TokenService) audienceAllowsMCPConnectRequest(audience string, req *http.Request) bool {
+	if audience == "" || req == nil || req.URL == nil {
+		return false
+	}
+
+	audienceURL, err := url.Parse(audience)
+	if err != nil {
+		return false
+	}
+	if !sameURLOrigin(audience, t.serverURL) {
+		return false
+	}
+
+	audiencePath := audienceURL.EscapedPath()
+	if audiencePath == "" {
+		audiencePath = "/"
+	}
+	if audiencePath != "/mcp-connect" && !strings.HasPrefix(audiencePath, "/mcp-connect/") {
+		return false
+	}
+
+	requestPath := req.URL.EscapedPath()
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	return requestPath == audiencePath || strings.HasPrefix(requestPath, strings.TrimRight(audiencePath, "/")+"/")
+}
+
+func (t *TokenService) audienceAllowsRegistryRequest(audience string, req *http.Request) bool {
+	if audience == "" || req == nil || req.URL == nil {
+		return false
+	}
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		return false
+	}
+
+	audienceURL, err := url.Parse(audience)
+	if err != nil {
+		return false
+	}
+	if !sameURLOrigin(audience, t.serverURL) {
+		return false
+	}
+
+	audiencePath := strings.TrimRight(audienceURL.EscapedPath(), "/")
+	switch audiencePath {
+	case "", "/":
+		requestPath := req.URL.EscapedPath()
+		return requestPath == "/v0.1" || strings.HasPrefix(requestPath, "/v0.1/")
+	case "/v0.1":
+		requestPath := req.URL.EscapedPath()
+		return requestPath == "/v0.1" || strings.HasPrefix(requestPath, "/v0.1/")
+	case "/v0.1/servers":
+		requestPath := req.URL.EscapedPath()
+		return requestPath == "/v0.1/servers" || strings.HasPrefix(requestPath, "/v0.1/servers/")
+	default:
+		return false
+	}
+}
+
+func sameURLOrigin(a, b string) bool {
+	aURL, err := url.Parse(a)
+	if err != nil {
+		return false
+	}
+	bURL, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(aURL.Scheme, bURL.Scheme) && strings.EqualFold(aURL.Host, bURL.Host)
 }
 
 func (t *TokenService) DecodeToken(ctx context.Context, token string) (*TokenContext, error) {
@@ -327,6 +435,7 @@ func (t *TokenService) DecodeToken(ctx context.Context, token string) (*TokenCon
 		AuthProviderNamespace: getStringClaim("AuthProviderNamespace"),
 		AuthProviderUserID:    getStringClaim("AuthProviderUserID"),
 		MCPID:                 getStringClaim("MCPID"),
+		TokenType:             TokenType(getStringClaim("TokenType")),
 		Namespace:             getStringClaim("Namespace"),
 		ModelProvider:         getStringClaim("ModelProvider"),
 		Model:                 getStringClaim("Model"),
