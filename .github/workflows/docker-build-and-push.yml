@@ -57,6 +57,8 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           build-args: |
             BASE_IMAGE=ghcr.io/obot-platform/obot/base:latest
+            PROVIDERS_IMAGE=ghcr.io/mayflower/obot-providers:latest
+            ENTERPRISE_PROVIDERS_IMAGE=ghcr.io/mayflower/obot-providers:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
